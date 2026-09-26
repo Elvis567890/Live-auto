@@ -1,0 +1,317 @@
+name: Build AI Live Band
+
+on:
+  push:
+    branches: [ main, master, first-prototype ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scaffold-and-test:
+    name: Scaffold, test, and package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system audio deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 portaudio19-dev fluidsynth libfluidsynth-dev
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pytest sounddevice mido pretty_midi pyfluidsynth
+
+      - name: Scaffold project files
+        run: |
+          mkdir -p src tests .github/workflows
+
+          cat > src/__init__.py << 'EOF'
+          EOF
+
+          cat > src/pitch.py << 'EOF'
+          import numpy as np
+
+          NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+          def detect_pitch(samples, samplerate, min_freq=50, max_freq=1000):
+              samples = np.asarray(samples, dtype=np.float32)
+              if samples.ndim > 1:
+                  samples = samples[:, 0]
+              samples = samples - np.mean(samples)
+              if np.max(np.abs(samples)) < 1e-4:
+                  return 0.0
+              corr = np.correlate(samples, samples, mode='full')
+              corr = corr[len(corr)//2:]
+              min_lag = max(1, int(samplerate / max_freq))
+              max_lag = min(len(corr) - 1, int(samplerate / min_freq))
+              if max_lag <= min_lag:
+                  return 0.0
+              peak = np.argmax(corr[min_lag:max_lag]) + min_lag
+              if corr[peak] < 0.1 * corr[0]:
+                  return 0.0
+              return float(samplerate / peak)
+
+          def freq_to_note(freq):
+              if freq <= 0:
+                  return "—"
+              midi = 69 + 12 * np.log2(freq / 440.0)
+              note = int(round(midi))
+              name = NOTE_NAMES[note % 12]
+              octave = note // 12 - 1
+              return f"{name}{octave}"
+
+          def freq_to_midi(freq):
+              if freq <= 0:
+                  return 0
+              return int(round(69 + 12 * np.log2(freq / 440.0)))
+          EOF
+
+          cat > src/chords.py << 'EOF'
+          from collections import Counter
+
+          # Chord templates as semitone offsets from root
+          CHORD_TEMPLATES = {
+              'maj':  [0, 4, 7],
+              'min':  [0, 3, 7],
+              'dim':  [0, 3, 6],
+              'aug':  [0, 4, 8],
+              'sus4': [0, 5, 7],
+              'maj7': [0, 4, 7, 11],
+              'min7': [0, 3, 7, 10],
+          }
+
+          ROOTS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+          def infer_chord(midi_notes):
+              """Given a list of recent MIDI notes, guess the chord."""
+              if not midi_notes:
+                  return None
+              pcs = Counter([n % 12 for n in midi_notes])
+              best = None
+              best_score = -1
+              for root in range(12):
+                  for name, intervals in CHORD_TEMPLATES.items():
+                      chord_pcs = [(root + i) % 12 for i in intervals]
+                      score = sum(pcs.get(pc, 0) for pc in chord_pcs)
+                      # Penalize notes outside the chord
+                      outside = sum(c for pc, c in pcs.items() if pc not in chord_pcs)
+                      score -= 0.5 * outside
+                      if score > best_score:
+                          best_score = score
+                          best = f"{ROOTS[root]}{name}"
+              return best
+          EOF
+
+          cat > src/arranger.py << 'EOF'
+          """Decides which instruments play based on detected chord + dynamics."""
+
+          def arrange(chord, energy=0.5, beat=0):
+              """Return a dict of instruments -> MIDI notes to trigger."""
+              if chord is None:
+                  return {}
+
+              root_name = chord[:2] if len(chord) > 1 and chord[1] == '#' else chord[0]
+              quality = chord[len(root_name):]
+              root = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].index(root_name)
+              root_midi = 48 + root  # bass register
+
+              if 'maj' in quality and '7' in quality:
+                  third = root_midi + 4; seventh = root_midi + 11
+              elif 'min' in quality and '7' in quality:
+                  third = root_midi + 3; seventh = root_midi + 10
+              elif 'min' in quality:
+                  third = root_midi + 3; seventh = None
+              elif 'dim' in quality:
+                  third = root_midi + 3; seventh = None
+              else:
+                  third = root_midi + 4; seventh = None
+
+              fifth = root_midi + 7
+              piano_notes = [root_midi + 12, third + 12, fifth + 12]
+              if seventh is not None:
+                  piano_notes.append(seventh + 12)
+
+              out = {
+                  'bass': [root_midi] if beat % 2 == 0 else [],
+                  'piano': piano_notes if beat % 2 == 0 else [],
+                  'pad': piano_notes if energy < 0.5 else [],
+                  'drums': [36] if beat % 4 == 0 else ([38] if beat % 2 == 1 else []),
+              }
+              return out
+          EOF
+
+          cat > src/synth.py << 'EOF'
+          """MIDI event helper. Actual audio rendering handled by fluidsynth or a sampler later."""
+          import mido
+
+          def build_midi_file(events, path, tempo=120):
+              mid = mido.MidiFile()
+              track = mido.MidiTrack()
+              mid.tracks.append(track)
+              track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo)))
+              for note, velocity, duration_ticks in events:
+                  track.append(mido.Message('note_on', note=note, velocity=velocity, time=0))
+                  track.append(mido.Message('note_off', note=note, velocity=0, time=duration_ticks))
+              mid.save(path)
+              return path
+          EOF
+
+          cat > src/listen.py << 'EOF'
+          import sounddevice as sd
+          from src.pitch import detect_pitch, freq_to_note, freq_to_midi
+          from src.chords import infer_chord
+
+          samplerate = 44100
+          blocksize = 2048
+          recent_notes = []
+
+          def callback(indata, frames, time, status):
+              if status:
+                  print(status)
+              samples = indata[:, 0]
+              freq = detect_pitch(samples, samplerate)
+              if freq > 0:
+                  midi = freq_to_midi(freq)
+                  recent_notes.append(midi)
+                  if len(recent_notes) > 8:
+                      recent_notes.pop(0)
+                  chord = infer_chord(recent_notes)
+                  print(f"{freq_to_note(freq)} ({freq:.1f} Hz) -> chord: {chord}")
+
+          def main():
+              with sd.InputStream(channels=1, samplerate=samplerate, blocksize=blocksize, callback=callback):
+                  print("Listening... sing or play. Ctrl+C to stop.")
+                  input()
+
+          if __name__ == "__main__":
+              main()
+          EOF
+
+          cat > tests/test_pitch.py << 'EOF'
+          import numpy as np
+          from src.pitch import detect_pitch, freq_to_note, freq_to_midi
+
+          def test_detect_pitch_sine_a4():
+              sr = 44100
+              t = np.linspace(0, 0.5, sr // 2, endpoint=False)
+              samples = 0.5 * np.sin(2 * np.pi * 440.0 * t)
+              detected = detect_pitch(samples, sr)
+              assert abs(detected - 440.0) < 5
+              assert freq_to_note(detected) == "A4"
+              assert freq_to_midi(detected) == 69
+
+          def test_detect_pitch_silence():
+              samples = np.zeros(22050, dtype=np.float32)
+              assert detect_pitch(samples, 44100) == 0.0
+          EOF
+
+          cat > tests/test_chords.py << 'EOF'
+          from src.chords import infer_chord
+
+          def test_c_major():
+              # C, E, G
+              assert infer_chord([60, 64, 67]) == "Cmaj"
+
+          def test_a_minor():
+              # A, C, E
+              assert infer_chord([57, 60, 64]) == "Amin"
+
+          def test_empty():
+              assert infer_chord([]) is None
+          EOF
+
+          cat > tests/test_arranger.py << 'EOF'
+          from src.arranger import arrange
+
+          def test_arrange_cmaj():
+              out = arrange("Cmaj", energy=0.3, beat=0)
+              assert 'bass' in out and len(out['bass']) == 1
+              assert 'piano' in out and len(out['piano']) >= 3
+
+          def test_arrange_none():
+              assert arrange(None) == {}
+          EOF
+
+          cat > tests/test_synth.py << 'EOF'
+          import os
+          from src.synth import build_midi_file
+
+          def test_build_midi(tmp_path):
+              path = tmp_path / "test.mid"
+              events = [(60, 90, 480), (64, 90, 480), (67, 90, 480)]
+              build_midi_file(events, str(path))
+              assert os.path.exists(path)
+              assert os.path.getsize(path) > 0
+          EOF
+
+          cat > requirements.txt << 'EOF'
+          numpy
+          sounddevice
+          mido
+          pytest
+          EOF
+
+          cat > .gitignore << 'EOF'
+          __pycache__/
+          *.pyc
+          .venv/
+          venv/
+          *.mid
+          .DS_Store
+          EOF
+
+      - name: Run tests
+        run: |
+          pytest -q tests/
+
+      - name: Smoke test — offline pitch + chord + arrange pipeline
+        run: |
+          python - << 'EOF'
+          import numpy as np
+          from src.pitch import detect_pitch, freq_to_midi
+          from src.chords import infer_chord
+          from src.arranger import arrange
+          from src.synth import build_midi_file
+
+          sr = 44100
+          t = np.linspace(0, 0.5, sr // 2, endpoint=False)
+          notes = [261.63, 329.63, 392.00]  # C4 E4 G4
+          midis = []
+          for f in notes:
+              sig = 0.5 * np.sin(2 * np.pi * f * t)
+              det = detect_pitch(sig, sr)
+              midis.append(freq_to_midi(det))
+          chord = infer_chord(midis)
+          print("Detected chord:", chord)
+          arrangement = arrange(chord, energy=0.4, beat=0)
+          print("Arrangement:", arrangement)
+          events = [(n, 90, 480) for n in arrangement.get('piano', [])]
+          build_midi_file(events, "/tmp/smoke.mid")
+          print("MIDI written to /tmp/smoke.mid")
+          assert chord == "Cmaj"
+          EOF
+
+      - name: Upload scaffolded source as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-live-band-source
+          path: |
+            src/
+            tests/
+            requirements.txt
+            README.md
+
+      - name: Upload smoke-test MIDI
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-midi
+          path: /tmp/smoke.mid
