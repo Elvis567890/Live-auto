@@ -423,7 +423,7 @@ jobs:
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.1-bin.zip
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
           EOF
@@ -595,7 +595,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed v3 -> v4 and packages)
+  # 5. ANDROID (Fixed Gradle 8.1 compatibility)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -610,7 +610,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # FIXED: Upgraded to v4 and explicitly specified packages
       - uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
@@ -622,7 +621,10 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0"
 
+      # FIXED: Explicitly specify Gradle 8.1 for the setup action
       - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.1'
 
       - name: Cache JUCE
         uses: actions/cache@v4
@@ -630,8 +632,9 @@ jobs:
           path: build/_deps
           key: juce-${{ runner.os }}-8.0.4
 
+      # FIXED: Generate wrapper using Gradle 8.1
       - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.0
+        run: gradle wrapper --gradle-version 8.1
 
       - name: Build APK with Gradle
         env:
