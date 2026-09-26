@@ -595,7 +595,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Using Gradle wrapper)
+  # 5. ANDROID (Fixed v3 -> v4 and packages)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -610,12 +610,17 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # FIXED: Upgraded to v4 and explicitly specified packages
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
-      - name: Accept Android Licenses & Install NDK
+      - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
-          sdkmanager "ndk;25.2.9519653" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
+          sdkmanager --install \
+            "ndk;25.2.9519653" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
 
       - uses: gradle/actions/setup-gradle@v3
 
