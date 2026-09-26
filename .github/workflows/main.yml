@@ -447,8 +447,7 @@ jobs:
 
               externalNativeBuild {
                   cmake {
-                      path "../../CMakeLists.txt"
-                      version "3.22.1"
+                      path "../CMakeLists.txt"
                   }
               }
           }
@@ -595,7 +594,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed Gradle 8.1 compatibility)
+  # 5. ANDROID (Fixed CMake path)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -621,7 +620,6 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0"
 
-      # FIXED: Explicitly specify Gradle 8.1 for the setup action
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.1'
@@ -632,7 +630,6 @@ jobs:
           path: build/_deps
           key: juce-${{ runner.os }}-8.0.4
 
-      # FIXED: Generate wrapper using Gradle 8.1
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.1
 
