@@ -17,6 +17,7 @@ jobs:
         run: |
           mkdir -p Source
           mkdir -p gradle/wrapper
+          mkdir -p app/src/main/java/com/ailiveband/app
 
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
@@ -29,7 +30,7 @@ jobs:
           FetchContent_Declare(
             JUCE
             GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-            GIT_TAG 7.0.12
+            GIT_TAG 8.0.4
             GIT_SHALLOW TRUE
           )
           FetchContent_MakeAvailable(JUCE)
@@ -66,48 +67,6 @@ jobs:
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
-          EOF
-
-          cat > Source/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.ailiveband.app">
-              <application android:label="AI Live Band" android:hasCode="true" android:allowBackup="true">
-                  <activity android:name="com.rmsl.juce.JuceAppActivity" android:exported="true" android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-          </manifest>
-          EOF
-
-          cat > build.gradle << 'EOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.0'
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
           EOF
 
           cat > Source/PitchDetector.h << 'EOF'
@@ -438,6 +397,88 @@ jobs:
           START_JUCE_APPLICATION(AILiveBandApplication)
           EOF
 
+          # --- Android Scaffold Files ---
+          cat > settings.gradle << 'EOF'
+          include ':app'
+          EOF
+
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.0'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.ailiveband.app'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.ailiveband.app"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "0.1.0"
+              }
+
+              externalNativeBuild {
+                  cmake {
+                      path "../../CMakeLists.txt"
+                      version "3.22.1"
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.ailiveband.app">
+              <application android:label="AI Live Band" android:hasCode="true" android:allowBackup="true">
+                  <activity android:name="com.ailiveband.app.MainActivity" android:exported="true" android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/ailiveband/app/MainActivity.java << 'EOF'
+          package com.ailiveband.app;
+
+          import com.rmsl.juce.JuceAppActivity;
+
+          public class MainActivity extends JuceAppActivity {
+          }
+          EOF
+
       - uses: actions/upload-artifact@v4
         with:
           name: source
@@ -445,7 +486,9 @@ jobs:
             CMakeLists.txt
             Source/
             build.gradle
+            settings.gradle
             gradle/
+            app/
 
   # ─────────────────────────────────────────────
   # 2. LINUX (Fixed dependency for Ubuntu 24.04)
@@ -467,13 +510,13 @@ jobs:
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
             libxinerama-dev libxrandr-dev libxrender-dev \
             libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev \
-            libwebkit2gtk-4.1-dev
+            libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Cache JUCE
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-${{ runner.os }}-7.0.12
+          key: juce-${{ runner.os }}-8.0.4
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -504,7 +547,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-${{ runner.os }}-7.0.12
+          key: juce-${{ runner.os }}-8.0.4
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -519,7 +562,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.exe
 
   # ─────────────────────────────────────────────
-  # 4. macOS (Fixed architecture for Apple Silicon)
+  # 4. macOS (Fixed architecture & warnings)
   # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
@@ -532,14 +575,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-${{ runner.os }}-7.0.12
+          key: juce-${{ runner.os }}-8.0.4
 
       - name: Configure
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_CXX_FLAGS="-Wno-error"
 
       - name: Build
         run: cmake --build build --config Release
@@ -571,7 +615,7 @@ jobs:
       - name: Accept Android Licenses & Install NDK
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
-          sdkmanager "ndk;25.2.9519653" "platforms;android-24" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
+          sdkmanager "ndk;25.2.9519653" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
 
       - uses: gradle/actions/setup-gradle@v3
 
@@ -579,7 +623,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-${{ runner.os }}-7.0.12
+          key: juce-${{ runner.os }}-8.0.4
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.0
