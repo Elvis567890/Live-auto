@@ -16,7 +16,6 @@ jobs:
       - name: Create project files
         run: |
           mkdir -p Source
-          mkdir -p gradle/wrapper
 
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
@@ -420,7 +419,7 @@ jobs:
             Source/
 
   # ─────────────────────────────────────────────
-  # 2. LINUX
+  # 2. LINUX (Fixed package name)
   # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
@@ -429,16 +428,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: source }
 
-      - name: Install Linux audio/UI deps
+      - name: Install Linux deps
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential cmake ninja-build \
             libasound2-dev libjack-jackd2-dev \
             libfreetype6-dev libfontconfig1-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
             libxinerama-dev libxrandr-dev libxrender-dev \
-            libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev \
-            libwebkit2gtk-4.0-dev
+            libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev
 
       - name: Cache JUCE
         uses: actions/cache@v4
@@ -447,10 +446,10 @@ jobs:
           key: juce-${{ runner.os }}-7.0.12
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release -j$(nproc)
+        run: cmake --build build --config Release
 
       - name: Upload Linux app
         uses: actions/upload-artifact@v4
@@ -459,7 +458,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band
 
   # ─────────────────────────────────────────────
-  # 3. WINDOWS
+  # 3. WINDOWS (Fixed using Ninja instead of VS)
   # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
@@ -478,10 +477,10 @@ jobs:
           key: juce-${{ runner.os }}-7.0.12
 
       - name: Configure
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release
 
       - name: Upload Windows app
         uses: actions/upload-artifact@v4
@@ -490,7 +489,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.exe
 
   # ─────────────────────────────────────────────
-  # 4. macOS (universal)
+  # 4. macOS (Fixed using Ninja instead of Xcode)
   # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
@@ -506,13 +505,7 @@ jobs:
           key: juce-${{ runner.os }}-7.0.12
 
       - name: Configure
-        run: |
-          cmake -B build -G Xcode \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="-" \
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED="NO" \
-            -DJUCE_CODE_SIGNING_REQUIRED=OFF
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
 
       - name: Build
         run: cmake --build build --config Release
@@ -524,7 +517,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (APK)
+  # 5. ANDROID (Fixed SDK licenses)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -540,12 +533,10 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Accept Android Licenses & Install NDK
+      - name: Accept Licenses & Install NDK
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "ndk;25.2.9519653"
-
-      - uses: gradle/actions/setup-gradle@v3
+          yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
+          sdkmanager "ndk;25.2.9519653" --sdk_root=$ANDROID_HOME
 
       - name: Cache JUCE
         uses: actions/cache@v4
@@ -557,14 +548,14 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
         run: |
-          cmake -B build \
+          cmake -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build APK
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
