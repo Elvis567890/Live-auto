@@ -448,7 +448,7 @@ jobs:
             gradle/
 
   # ─────────────────────────────────────────────
-  # 2. LINUX (Fixed dependencies)
+  # 2. LINUX (Fixed dependency for Ubuntu 24.04)
   # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
@@ -466,7 +466,8 @@ jobs:
             libfreetype6-dev libfontconfig1-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
             libxinerama-dev libxrandr-dev libxrender-dev \
-            libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev
+            libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev \
+            libwebkit2gtk-4.1-dev
 
       - name: Cache JUCE
         uses: actions/cache@v4
@@ -487,7 +488,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band
 
   # ─────────────────────────────────────────────
-  # 3. WINDOWS (Passing already)
+  # 3. WINDOWS (Passing)
   # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
@@ -518,7 +519,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.exe
 
   # ─────────────────────────────────────────────
-  # 4. macOS (Fixed architecture)
+  # 4. macOS (Fixed architecture for Apple Silicon)
   # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
@@ -550,7 +551,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Allowed to fail while we stabilise)
+  # 5. ANDROID (Using Gradle wrapper)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -580,21 +581,16 @@ jobs:
           path: build/_deps
           key: juce-${{ runner.os }}-7.0.12
 
-      - name: Configure (arm64-v8a)
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.0
+
+      - name: Build APK with Gradle
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
-        run: |
-          cmake -B build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build APK
-        run: cmake --build build --config Release
+        run: ./gradlew assembleRelease
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
-          path: build/AILiveBand_artefacts/Release/AI Live Band.apk
+          path: app/build/outputs/apk/release/*.apk
