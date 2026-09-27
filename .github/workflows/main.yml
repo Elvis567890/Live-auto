@@ -574,54 +574,54 @@ jobs:
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
           make CXXFLAGS="-Wno-error" -j$(nproc)
 
-      # 4. Create Projucer project with absolute module paths and minSdk 21
+      # 4. Create Projucer project using a heredoc (reliable variable expansion) and minSdk 21
       - name: Create Projucer Project
         run: |
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="UTF-8"?>' \
-            '<JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"' \
-            '              version="0.1.0" companyName="AILiveBand"' \
-            '              platform="android" buildVST="0" buildAU="0" buildVST3="0"' \
-            '              buildStandalone="1" buildiOS="0" buildAndroid="1"' \
-            '              androidMinimumSDK="21" androidTargetSDK="34">' \
-            '  <MAINGROUP id="AILiveBand" name="AI Live Band">' \
-            '    <GROUP id="Source" name="Source">' \
-            '      <FILE id="Main_cpp" name="Main.cpp" compile="1" resource="0"' \
-            '            file="Source/Main.cpp"/>' \
-            '      <FILE id="MainComponent_cpp" name="MainComponent.cpp" compile="1"' \
-            '            resource="0" file="Source/MainComponent.cpp"/>' \
-            '      <FILE id="PitchDetector_cpp" name="PitchDetector.cpp" compile="1"' \
-            '            resource="0" file="Source/PitchDetector.cpp"/>' \
-            '      <FILE id="ChordInference_cpp" name="ChordInference.cpp" compile="1"' \
-            '            resource="0" file="Source/ChordInference.cpp"/>' \
-            '    </GROUP>' \
-            '  </MAINGROUP>' \
-            '  <MODULES>' \
-            '    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
-            '  </MODULES>' \
-            '  <EXPORTFORMATS>' \
-            '    <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">' \
-            '      <CONFIGURATIONS>' \
-            '        <CONFIGURATION name="Debug" isDebug="1" optimisation="1"' \
-            '                       targetName="AI Live Band"/>' \
-            '        <CONFIGURATION name="Release" isDebug="0" optimisation="3"' \
-            '                       targetName="AI Live Band"/>' \
-            '      </CONFIGURATIONS>' \
-            '    </ANDROIDSTUDIO>' \
-            '  </EXPORTFORMATS>' \
-            '</JUCERPROJECT>' \
-            > AILiveBand.jucer
+          cat > AILiveBand.jucer <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"
+                        version="0.1.0" companyName="AILiveBand"
+                        platform="android" buildVST="0" buildAU="0" buildVST3="0"
+                        buildStandalone="1" buildiOS="0" buildAndroid="1"
+                        androidMinimumSDK="21" androidTargetSDK="34">
+            <MAINGROUP id="AILiveBand" name="AI Live Band">
+              <GROUP id="Source" name="Source">
+                <FILE id="Main_cpp" name="Main.cpp" compile="1" resource="0"
+                      file="Source/Main.cpp"/>
+                <FILE id="MainComponent_cpp" name="MainComponent.cpp" compile="1"
+                      resource="0" file="Source/MainComponent.cpp"/>
+                <FILE id="PitchDetector_cpp" name="PitchDetector.cpp" compile="1"
+                      resource="0" file="Source/PitchDetector.cpp"/>
+                <FILE id="ChordInference_cpp" name="ChordInference.cpp" compile="1"
+                      resource="0" file="Source/ChordInference.cpp"/>
+              </GROUP>
+            </MAINGROUP>
+            <MODULES>
+              <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+            </MODULES>
+            <EXPORTFORMATS>
+              <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">
+                <CONFIGURATIONS>
+                  <CONFIGURATION name="Debug" isDebug="1" optimisation="1"
+                                 targetName="AI Live Band"/>
+                  <CONFIGURATION name="Release" isDebug="0" optimisation="3"
+                                 targetName="AI Live Band"/>
+                </CONFIGURATIONS>
+              </ANDROIDSTUDIO>
+            </EXPORTFORMATS>
+          </JUCERPROJECT>
+          EOF
 
       - name: Generate Android Studio Project
         run: |
