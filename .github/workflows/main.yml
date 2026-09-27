@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
-  # 1. SCAFFOLD — creates every C++ source file
+  # 1. SCAFFOLD — creates every C++ source file using printf to avoid YAML heredoc conflicts
   # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
@@ -17,383 +17,391 @@ jobs:
         run: |
           mkdir -p Source
 
-          cat > CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.22)
-          project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
+          # CMakeLists.txt
+          printf '%s\n' \
+            'cmake_minimum_required(VERSION 3.22)' \
+            'project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)' \
+            '' \
+            'set(CMAKE_CXX_STANDARD 17)' \
+            'set(CMAKE_CXX_STANDARD_REQUIRED ON)' \
+            '' \
+            'include(FetchContent)' \
+            'FetchContent_Declare(' \
+            '  JUCE' \
+            '  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git' \
+            '  GIT_TAG 8.0.4' \
+            '  GIT_SHALLOW TRUE' \
+            ')' \
+            'FetchContent_MakeAvailable(JUCE)' \
+            '' \
+            'juce_add_gui_app(AILiveBand' \
+            '  PRODUCT_NAME "AI Live Band"' \
+            '  COMPANY_NAME "AILiveBand"' \
+            '  VERSION "0.1.0"' \
+            ')' \
+            '' \
+            'juce_generate_juce_header(AILiveBand)' \
+            '' \
+            'target_sources(AILiveBand PRIVATE' \
+            '  Source/Main.cpp' \
+            '  Source/MainComponent.cpp' \
+            '  Source/PitchDetector.cpp' \
+            '  Source/ChordInference.cpp' \
+            ')' \
+            '' \
+            'target_compile_definitions(AILiveBand PRIVATE' \
+            '  JUCE_WEB_BROWSER=0' \
+            '  JUCE_USE_CURL=0' \
+            '  JUCE_DISPLAY_SPLASH_SCREEN=0' \
+            '  JUCE_APPLICATION_NAME_STRING="AI Live Band"' \
+            '  JUCE_APPLICATION_VERSION_STRING="0.1.0"' \
+            ')' \
+            '' \
+            'target_link_libraries(AILiveBand PRIVATE' \
+            '  juce::juce_audio_utils' \
+            '  juce::juce_audio_devices' \
+            '  juce::juce_dsp' \
+            '  juce::juce_gui_extra' \
+            '  PUBLIC' \
+            '  juce::juce_recommended_config_flags' \
+            '  juce::juce_recommended_warning_flags' \
+            ')' \
+            > CMakeLists.txt
 
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          # Source/PitchDetector.h
+          printf '%s\n' \
+            '#pragma once' \
+            '#include <JuceHeader.h>' \
+            '' \
+            'class PitchDetector {' \
+            'public:' \
+            '    explicit PitchDetector(double sampleRate);' \
+            '    float detect(const float* samples, int numSamples);' \
+            '    static juce::String freqToNote(float freq);' \
+            '    static int freqToMidi(float freq);' \
+            'private:' \
+            '    double sr;' \
+            '};' \
+            > Source/PitchDetector.h
 
-          include(FetchContent)
-          FetchContent_Declare(
-            JUCE
-            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-            GIT_TAG 8.0.4
-            GIT_SHALLOW TRUE
-          )
-          FetchContent_MakeAvailable(JUCE)
+          # Source/PitchDetector.cpp
+          printf '%s\n' \
+            '#include "PitchDetector.h"' \
+            '' \
+            'PitchDetector::PitchDetector(double sampleRate) : sr(sampleRate) {}' \
+            '' \
+            'float PitchDetector::detect(const float* samples, int numSamples) {' \
+            '    if (numSamples < 64) return 0.0f;' \
+            '' \
+            '    float mean = 0.0f;' \
+            '    for (int i = 0; i < numSamples; ++i) mean += samples[i];' \
+            '    mean /= (float)numSamples;' \
+            '' \
+            '    float energy = 0.0f;' \
+            '    for (int i = 0; i < numSamples; ++i) {' \
+            '        float v = samples[i] - mean;' \
+            '        energy += v * v;' \
+            '    }' \
+            '    if (energy < 1e-5f) return 0.0f;' \
+            '' \
+            '    int minLag = (int)(sr / 1000.0);' \
+            '    int maxLag = (int)(sr / 60.0);' \
+            '    if (maxLag >= numSamples) maxLag = numSamples - 1;' \
+            '    if (minLag < 1) minLag = 1;' \
+            '' \
+            '    int bestLag = 0;' \
+            '    float bestCorr = 0.0f;' \
+            '    for (int lag = minLag; lag <= maxLag; ++lag) {' \
+            '        float corr = 0.0f;' \
+            '        for (int i = 0; i < numSamples - lag; ++i)' \
+            '            corr += (samples[i] - mean) * (samples[i + lag] - mean);' \
+            '        if (corr > bestCorr) {' \
+            '            bestCorr = corr;' \
+            '            bestLag = lag;' \
+            '        }' \
+            '    }' \
+            '    if (bestLag == 0 || bestCorr < 0.2f * energy) return 0.0f;' \
+            '    return (float)(sr / (double)bestLag);' \
+            '}' \
+            '' \
+            'juce::String PitchDetector::freqToNote(float freq) {' \
+            '    if (freq <= 0.0f) return "-";' \
+            '    static const char* names[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};' \
+            '    int midi = freqToMidi(freq);' \
+            '    int pc = ((midi % 12) + 12) % 12;' \
+            '    int oct = midi / 12 - 1;' \
+            '    return juce::String(names[pc]) + juce::String(oct);' \
+            '}' \
+            '' \
+            'int PitchDetector::freqToMidi(float freq) {' \
+            '    if (freq <= 0.0f) return 0;' \
+            '    return (int)std::round(69.0 + 12.0 * std::log2(freq / 440.0));' \
+            '}' \
+            > Source/PitchDetector.cpp
 
-          juce_add_gui_app(AILiveBand
-            PRODUCT_NAME "AI Live Band"
-            COMPANY_NAME "AILiveBand"
-            VERSION "0.1.0"
-          )
+          # Source/ChordInference.h
+          printf '%s\n' \
+            '#pragma once' \
+            '#include <JuceHeader.h>' \
+            '#include <vector>' \
+            '' \
+            'class ChordInference {' \
+            'public:' \
+            '    void addNote(int midi);' \
+            '    juce::String getChord() const;' \
+            '    void clear();' \
+            'private:' \
+            '    std::vector<int> recent;' \
+            '    mutable juce::CriticalSection lock;' \
+            '};' \
+            > Source/ChordInference.h
 
-          juce_generate_juce_header(AILiveBand)
+          # Source/ChordInference.cpp
+          printf '%s\n' \
+            '#include "ChordInference.h"' \
+            '' \
+            'namespace {' \
+            '    const char* ROOTS[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};' \
+            '    struct Template { const char* name; std::vector<int> intervals; };' \
+            '    const std::vector<Template> TEMPLATES = {' \
+            '        {"maj",  {0,4,7}},' \
+            '        {"min",  {0,3,7}},' \
+            '        {"dim",  {0,3,6}},' \
+            '        {"aug",  {0,4,8}},' \
+            '        {"sus4", {0,5,7}},' \
+            '        {"maj7", {0,4,7,11}},' \
+            '        {"min7", {0,3,7,10}},' \
+            '    };' \
+            '}' \
+            '' \
+            'void ChordInference::addNote(int midi) {' \
+            '    if (midi <= 0) return;' \
+            '    const juce::ScopedLock sl(lock);' \
+            '    recent.push_back(midi);' \
+            '    if (recent.size() > 12) recent.erase(recent.begin());' \
+            '}' \
+            '' \
+            'void ChordInference::clear() {' \
+            '    const juce::ScopedLock sl(lock);' \
+            '    recent.clear();' \
+            '}' \
+            '' \
+            'juce::String ChordInference::getChord() const {' \
+            '    const juce::ScopedLock sl(lock);' \
+            '    if (recent.empty()) return "-";' \
+            '' \
+            '    int counts[12] = {0};' \
+            '    for (int n : recent) counts[((n % 12) + 12) % 12]++;' \
+            '' \
+            '    int bestRoot = -1, bestScore = -1;' \
+            '    juce::String bestName;' \
+            '    for (int root = 0; root < 12; ++root) {' \
+            '        for (auto& t : TEMPLATES) {' \
+            '            int score = 0, outside = 0;' \
+            '            bool inChord[12] = {false};' \
+            '            for (int iv : t.intervals) inChord[(root + iv) % 12] = true;' \
+            '            for (int pc = 0; pc < 12; ++pc) {' \
+            '                if (inChord[pc]) score += counts[pc];' \
+            '                else outside += counts[pc];' \
+            '            }' \
+            '            score -= outside / 2;' \
+            '            if (score > bestScore) {' \
+            '                bestScore = score;' \
+            '                bestRoot = root;' \
+            '                bestName = juce::String(ROOTS[root]) + t.name;' \
+            '            }' \
+            '        }' \
+            '    }' \
+            '    return bestRoot < 0 ? juce::String("-") : bestName;' \
+            '}' \
+            > Source/ChordInference.cpp
 
-          target_sources(AILiveBand PRIVATE
-            Source/Main.cpp
-            Source/MainComponent.cpp
-            Source/PitchDetector.cpp
-            Source/ChordInference.cpp
-          )
+          # Source/MainComponent.h
+          printf '%s\n' \
+            '#pragma once' \
+            '#include <JuceHeader.h>' \
+            '#include "PitchDetector.h"' \
+            '#include "ChordInference.h"' \
+            '' \
+            'class MainComponent : public juce::Component,' \
+            '                      public juce::AudioIODeviceCallback,' \
+            '                      private juce::Timer' \
+            '{' \
+            'public:' \
+            '    MainComponent();' \
+            '    ~MainComponent() override;' \
+            '' \
+            '    void paint(juce::Graphics&) override;' \
+            '    void resized() override;' \
+            '' \
+            '    void audioDeviceIOCallbackWithContext(' \
+            '        const float* const* inputChannelData, int numInputChannels,' \
+            '        float* const* outputChannelData, int numOutputChannels,' \
+            '        int numSamples,' \
+            '        const juce::AudioIODeviceCallbackContext& context) override;' \
+            '    void audioDeviceAboutToStart(juce::AudioIODevice* device) override;' \
+            '    void audioDeviceStopped() override;' \
+            '' \
+            'private:' \
+            '    void timerCallback() override;' \
+            '' \
+            '    juce::AudioDeviceManager deviceManager;' \
+            '    std::unique_ptr<PitchDetector> pitchDetector;' \
+            '    ChordInference chordInference;' \
+            '' \
+            '    juce::Label noteLabel, chordLabel, statusLabel;' \
+            '    juce::TextButton startButton { "Start" };' \
+            '' \
+            '    std::atomic<float> currentFreq { 0.0f };' \
+            '    std::atomic<int>   currentMidi { 0 };' \
+            '' \
+            '    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)' \
+            '};' \
+            > Source/MainComponent.h
 
-          target_compile_definitions(AILiveBand PRIVATE
-            JUCE_WEB_BROWSER=0
-            JUCE_USE_CURL=0
-            JUCE_DISPLAY_SPLASH_SCREEN=0
-            JUCE_APPLICATION_NAME_STRING="AI Live Band"
-            JUCE_APPLICATION_VERSION_STRING="0.1.0"
-          )
+          # Source/MainComponent.cpp
+          printf '%s\n' \
+            '#include "MainComponent.h"' \
+            '' \
+            'MainComponent::MainComponent() {' \
+            '    addAndMakeVisible(noteLabel);' \
+            '    addAndMakeVisible(chordLabel);' \
+            '    addAndMakeVisible(statusLabel);' \
+            '    addAndMakeVisible(startButton);' \
+            '' \
+            '    noteLabel.setFont(juce::Font(28.0f));' \
+            '    chordLabel.setFont(juce::Font(28.0f));' \
+            '    statusLabel.setFont(juce::Font(16.0f));' \
+            '    noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);' \
+            '    chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);' \
+            '    statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);' \
+            '' \
+            '    noteLabel.setText("Note: -", juce::dontSendNotification);' \
+            '    chordLabel.setText("Chord: -", juce::dontSendNotification);' \
+            '    statusLabel.setText("Audio: stopped", juce::dontSendNotification);' \
+            '' \
+            '    startButton.onClick = [this] {' \
+            '        if (deviceManager.getCurrentAudioDevice() == nullptr) {' \
+            '            auto err = deviceManager.initialiseWithDefaultDevices(1, 0);' \
+            '            if (err.isNotEmpty()) {' \
+            '                statusLabel.setText("Error: " + err, juce::dontSendNotification);' \
+            '                return;' \
+            '            }' \
+            '            deviceManager.addAudioCallback(this);' \
+            '            statusLabel.setText("Audio: running", juce::dontSendNotification);' \
+            '            startButton.setButtonText("Stop");' \
+            '        } else {' \
+            '            deviceManager.removeAudioCallback(this);' \
+            '            deviceManager.closeAudioDevice();' \
+            '            statusLabel.setText("Audio: stopped", juce::dontSendNotification);' \
+            '            startButton.setButtonText("Start");' \
+            '        }' \
+            '    };' \
+            '' \
+            '    setSize(700, 420);' \
+            '    startTimerHz(20);' \
+            '}' \
+            '' \
+            'MainComponent::~MainComponent() {' \
+            '    stopTimer();' \
+            '    deviceManager.removeAudioCallback(this);' \
+            '    deviceManager.closeAudioDevice();' \
+            '}' \
+            '' \
+            'void MainComponent::paint(juce::Graphics& g) {' \
+            '    g.fillAll(juce::Colour::fromRGB(20, 20, 30));' \
+            '}' \
+            '' \
+            'void MainComponent::resized() {' \
+            '    auto area = getLocalBounds().reduced(24);' \
+            '    noteLabel.setBounds(area.removeFromTop(60));' \
+            '    chordLabel.setBounds(area.removeFromTop(60));' \
+            '    statusLabel.setBounds(area.removeFromTop(30));' \
+            '    area.removeFromTop(20);' \
+            '    startButton.setBounds(area.removeFromTop(48).removeFromLeft(160));' \
+            '}' \
+            '' \
+            'void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device) {' \
+            '    pitchDetector = std::make_unique<PitchDetector>(device->getCurrentSampleRate());' \
+            '}' \
+            '' \
+            'void MainComponent::audioDeviceStopped() {' \
+            '    pitchDetector.reset();' \
+            '}' \
+            '' \
+            'void MainComponent::audioDeviceIOCallbackWithContext(' \
+            '    const float* const* inputChannelData, int numInputChannels,' \
+            '    float* const* outputChannelData, int numOutputChannels,' \
+            '    int numSamples, const juce::AudioIODeviceCallbackContext&)' \
+            '{' \
+            '    for (int ch = 0; ch < numOutputChannels; ++ch)' \
+            '        if (outputChannelData[ch])' \
+            '            juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);' \
+            '' \
+            '    if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {' \
+            '        float freq = pitchDetector->detect(inputChannelData[0], numSamples);' \
+            '        if (freq > 0.0f) {' \
+            '            currentFreq.store(freq);' \
+            '            int midi = PitchDetector::freqToMidi(freq);' \
+            '            currentMidi.store(midi);' \
+            '            chordInference.addNote(midi);' \
+            '        }' \
+            '    }' \
+            '}' \
+            '' \
+            'void MainComponent::timerCallback() {' \
+            '    float f = currentFreq.load();' \
+            '    if (f > 0.0f) {' \
+            '        noteLabel.setText("Note: " + PitchDetector::freqToNote(f) +' \
+            '                          "  (" + juce::String(f, 1) + " Hz)",' \
+            '                          juce::dontSendNotification);' \
+            '    }' \
+            '    chordLabel.setText("Chord: " + chordInference.getChord(),' \
+            '                       juce::dontSendNotification);' \
+            '}' \
+            > Source/MainComponent.cpp
 
-          target_link_libraries(AILiveBand PRIVATE
-            juce::juce_audio_utils
-            juce::juce_audio_devices
-            juce::juce_dsp
-            juce::juce_gui_extra
-            PUBLIC
-            juce::juce_recommended_config_flags
-            juce::juce_recommended_warning_flags
-          )
-          EOF
-
-          cat > Source/PitchDetector.h << 'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-
-          class PitchDetector {
-          public:
-              explicit PitchDetector(double sampleRate);
-              float detect(const float* samples, int numSamples);
-              static juce::String freqToNote(float freq);
-              static int freqToMidi(float freq);
-          private:
-              double sr;
-          };
-          EOF
-
-          cat > Source/PitchDetector.cpp << 'EOF'
-          #include "PitchDetector.h"
-
-          PitchDetector::PitchDetector(double sampleRate) : sr(sampleRate) {}
-
-          float PitchDetector::detect(const float* samples, int numSamples) {
-              if (numSamples < 64) return 0.0f;
-
-              float mean = 0.0f;
-              for (int i = 0; i < numSamples; ++i) mean += samples[i];
-              mean /= (float)numSamples;
-
-              float energy = 0.0f;
-              for (int i = 0; i < numSamples; ++i) {
-                  float v = samples[i] - mean;
-                  energy += v * v;
-              }
-              if (energy < 1e-5f) return 0.0f;
-
-              int minLag = (int)(sr / 1000.0);
-              int maxLag = (int)(sr / 60.0);
-              if (maxLag >= numSamples) maxLag = numSamples - 1;
-              if (minLag < 1) minLag = 1;
-
-              int bestLag = 0;
-              float bestCorr = 0.0f;
-              for (int lag = minLag; lag <= maxLag; ++lag) {
-                  float corr = 0.0f;
-                  for (int i = 0; i < numSamples - lag; ++i)
-                      corr += (samples[i] - mean) * (samples[i + lag] - mean);
-                  if (corr > bestCorr) {
-                      bestCorr = corr;
-                      bestLag = lag;
-                  }
-              }
-              if (bestLag == 0 || bestCorr < 0.2f * energy) return 0.0f;
-              return (float)(sr / (double)bestLag);
-          }
-
-          juce::String PitchDetector::freqToNote(float freq) {
-              if (freq <= 0.0f) return "-";
-              static const char* names[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-              int midi = freqToMidi(freq);
-              int pc = ((midi % 12) + 12) % 12;
-              int oct = midi / 12 - 1;
-              return juce::String(names[pc]) + juce::String(oct);
-          }
-
-          int PitchDetector::freqToMidi(float freq) {
-              if (freq <= 0.0f) return 0;
-              return (int)std::round(69.0 + 12.0 * std::log2(freq / 440.0));
-          }
-          EOF
-
-          cat > Source/ChordInference.h << 'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-          #include <vector>
-
-          class ChordInference {
-          public:
-              void addNote(int midi);
-              juce::String getChord() const;
-              void clear();
-          private:
-              std::vector<int> recent;
-              mutable juce::CriticalSection lock;
-          };
-          EOF
-
-          cat > Source/ChordInference.cpp << 'EOF'
-          #include "ChordInference.h"
-
-          namespace {
-              const char* ROOTS[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
-              struct Template { const char* name; std::vector<int> intervals; };
-              const std::vector<Template> TEMPLATES = {
-                  {"maj",  {0,4,7}},
-                  {"min",  {0,3,7}},
-                  {"dim",  {0,3,6}},
-                  {"aug",  {0,4,8}},
-                  {"sus4", {0,5,7}},
-                  {"maj7", {0,4,7,11}},
-                  {"min7", {0,3,7,10}},
-              };
-          }
-
-          void ChordInference::addNote(int midi) {
-              if (midi <= 0) return;
-              const juce::ScopedLock sl(lock);
-              recent.push_back(midi);
-              if (recent.size() > 12) recent.erase(recent.begin());
-          }
-
-          void ChordInference::clear() {
-              const juce::ScopedLock sl(lock);
-              recent.clear();
-          }
-
-          juce::String ChordInference::getChord() const {
-              const juce::ScopedLock sl(lock);
-              if (recent.empty()) return "-";
-
-              int counts[12] = {0};
-              for (int n : recent) counts[((n % 12) + 12) % 12]++;
-
-              int bestRoot = -1, bestScore = -1;
-              juce::String bestName;
-              for (int root = 0; root < 12; ++root) {
-                  for (auto& t : TEMPLATES) {
-                      int score = 0, outside = 0;
-                      bool inChord[12] = {false};
-                      for (int iv : t.intervals) inChord[(root + iv) % 12] = true;
-                      for (int pc = 0; pc < 12; ++pc) {
-                          if (inChord[pc]) score += counts[pc];
-                          else outside += counts[pc];
-                      }
-                      score -= outside / 2;
-                      if (score > bestScore) {
-                          bestScore = score;
-                          bestRoot = root;
-                          bestName = juce::String(ROOTS[root]) + t.name;
-                      }
-                  }
-              }
-              return bestRoot < 0 ? juce::String("-") : bestName;
-          }
-          EOF
-
-          cat > Source/MainComponent.h << 'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-          #include "PitchDetector.h"
-          #include "ChordInference.h"
-
-          class MainComponent : public juce::Component,
-                                public juce::AudioIODeviceCallback,
-                                private juce::Timer
-          {
-          public:
-              MainComponent();
-              ~MainComponent() override;
-
-              void paint(juce::Graphics&) override;
-              void resized() override;
-
-              void audioDeviceIOCallbackWithContext(
-                  const float* const* inputChannelData, int numInputChannels,
-                  float* const* outputChannelData, int numOutputChannels,
-                  int numSamples,
-                  const juce::AudioIODeviceCallbackContext& context) override;
-              void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
-              void audioDeviceStopped() override;
-
-          private:
-              void timerCallback() override;
-
-              juce::AudioDeviceManager deviceManager;
-              std::unique_ptr<PitchDetector> pitchDetector;
-              ChordInference chordInference;
-
-              juce::Label noteLabel, chordLabel, statusLabel;
-              juce::TextButton startButton { "Start" };
-
-              std::atomic<float> currentFreq { 0.0f };
-              std::atomic<int>   currentMidi { 0 };
-
-              JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
-          };
-          EOF
-
-          cat > Source/MainComponent.cpp << 'EOF'
-          #include "MainComponent.h"
-
-          MainComponent::MainComponent() {
-              addAndMakeVisible(noteLabel);
-              addAndMakeVisible(chordLabel);
-              addAndMakeVisible(statusLabel);
-              addAndMakeVisible(startButton);
-
-              noteLabel.setFont(juce::Font(28.0f));
-              chordLabel.setFont(juce::Font(28.0f));
-              statusLabel.setFont(juce::Font(16.0f));
-              noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-              chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
-              statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
-
-              noteLabel.setText("Note: -", juce::dontSendNotification);
-              chordLabel.setText("Chord: -", juce::dontSendNotification);
-              statusLabel.setText("Audio: stopped", juce::dontSendNotification);
-
-              startButton.onClick = [this] {
-                  if (deviceManager.getCurrentAudioDevice() == nullptr) {
-                      auto err = deviceManager.initialiseWithDefaultDevices(1, 0);
-                      if (err.isNotEmpty()) {
-                          statusLabel.setText("Error: " + err, juce::dontSendNotification);
-                          return;
-                      }
-                      deviceManager.addAudioCallback(this);
-                      statusLabel.setText("Audio: running", juce::dontSendNotification);
-                      startButton.setButtonText("Stop");
-                  } else {
-                      deviceManager.removeAudioCallback(this);
-                      deviceManager.closeAudioDevice();
-                      statusLabel.setText("Audio: stopped", juce::dontSendNotification);
-                      startButton.setButtonText("Start");
-                  }
-              };
-
-              setSize(700, 420);
-              startTimerHz(20);
-          }
-
-          MainComponent::~MainComponent() {
-              stopTimer();
-              deviceManager.removeAudioCallback(this);
-              deviceManager.closeAudioDevice();
-          }
-
-          void MainComponent::paint(juce::Graphics& g) {
-              g.fillAll(juce::Colour::fromRGB(20, 20, 30));
-          }
-
-          void MainComponent::resized() {
-              auto area = getLocalBounds().reduced(24);
-              noteLabel.setBounds(area.removeFromTop(60));
-              chordLabel.setBounds(area.removeFromTop(60));
-              statusLabel.setBounds(area.removeFromTop(30));
-              area.removeFromTop(20);
-              startButton.setBounds(area.removeFromTop(48).removeFromLeft(160));
-          }
-
-          void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device) {
-              pitchDetector = std::make_unique<PitchDetector>(device->getCurrentSampleRate());
-          }
-
-          void MainComponent::audioDeviceStopped() {
-              pitchDetector.reset();
-          }
-
-          void MainComponent::audioDeviceIOCallbackWithContext(
-              const float* const* inputChannelData, int numInputChannels,
-              float* const* outputChannelData, int numOutputChannels,
-              int numSamples, const juce::AudioIODeviceCallbackContext&)
-          {
-              for (int ch = 0; ch < numOutputChannels; ++ch)
-                  if (outputChannelData[ch])
-                      juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
-
-              if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
-                  float freq = pitchDetector->detect(inputChannelData[0], numSamples);
-                  if (freq > 0.0f) {
-                      currentFreq.store(freq);
-                      int midi = PitchDetector::freqToMidi(freq);
-                      currentMidi.store(midi);
-                      chordInference.addNote(midi);
-                  }
-              }
-          }
-
-          void MainComponent::timerCallback() {
-              float f = currentFreq.load();
-              if (f > 0.0f) {
-                  noteLabel.setText("Note: " + PitchDetector::freqToNote(f) +
-                                    "  (" + juce::String(f, 1) + " Hz)",
-                                    juce::dontSendNotification);
-              }
-              chordLabel.setText("Chord: " + chordInference.getChord(),
-                                 juce::dontSendNotification);
-          }
-          EOF
-
-          cat > Source/Main.cpp << 'EOF'
-          #include <JuceHeader.h>
-          #include "MainComponent.h"
-
-          class AILiveBandApplication : public juce::JUCEApplication {
-          public:
-              const juce::String getApplicationName() override    { return "AI Live Band"; }
-              const juce::String getApplicationVersion() override { return "0.1.0"; }
-              bool moreThanOneInstanceAllowed() override          { return true; }
-
-              void initialise(const juce::String&) override {
-                  mainWindow.reset(new MainWindow(getApplicationName()));
-              }
-              void shutdown() override { mainWindow.reset(); }
-              void systemRequestedQuit() override { quit(); }
-
-              class MainWindow : public juce::DocumentWindow {
-              public:
-                  explicit MainWindow(juce::String name)
-                      : DocumentWindow(name,
-                                       juce::Colours::black,
-                                       DocumentWindow::allButtons)
-                  {
-                      setUsingNativeTitleBar(true);
-                      setContentOwned(new MainComponent(), true);
-                      setResizable(true, true);
-                      centreWithSize(getWidth(), getHeight());
-                      setVisible(true);
-                  }
-                  void closeButtonPressed() override {
-                      JUCEApplication::getInstance()->systemRequestedQuit();
-                  }
-              };
-
-          private:
-              std::unique_ptr<MainWindow> mainWindow;
-          };
-
-          START_JUCE_APPLICATION(AILiveBandApplication)
-          EOF
+          # Source/Main.cpp
+          printf '%s\n' \
+            '#include <JuceHeader.h>' \
+            '#include "MainComponent.h"' \
+            '' \
+            'class AILiveBandApplication : public juce::JUCEApplication {' \
+            'public:' \
+            '    const juce::String getApplicationName() override    { return "AI Live Band"; }' \
+            '    const juce::String getApplicationVersion() override { return "0.1.0"; }' \
+            '    bool moreThanOneInstanceAllowed() override          { return true; }' \
+            '' \
+            '    void initialise(const juce::String&) override {' \
+            '        mainWindow.reset(new MainWindow(getApplicationName()));' \
+            '    }' \
+            '    void shutdown() override { mainWindow.reset(); }' \
+            '    void systemRequestedQuit() override { quit(); }' \
+            '' \
+            '    class MainWindow : public juce::DocumentWindow {' \
+            '    public:' \
+            '        explicit MainWindow(juce::String name)' \
+            '            : DocumentWindow(name,' \
+            '                             juce::Colours::black,' \
+            '                             DocumentWindow::allButtons)' \
+            '        {' \
+            '            setUsingNativeTitleBar(true);' \
+            '            setContentOwned(new MainComponent(), true);' \
+            '            setResizable(true, true);' \
+            '            centreWithSize(getWidth(), getHeight());' \
+            '            setVisible(true);' \
+            '        }' \
+            '        void closeButtonPressed() override {' \
+            '            JUCEApplication::getInstance()->systemRequestedQuit();' \
+            '        }' \
+            '    };' \
+            '' \
+            'private:' \
+            '    std::unique_ptr<MainWindow> mainWindow;' \
+            '};' \
+            '' \
+            'START_JUCE_APPLICATION(AILiveBandApplication)' \
+            > Source/Main.cpp
 
       - uses: actions/upload-artifact@v4
         with:
@@ -403,7 +411,7 @@ jobs:
             Source/
 
   # ─────────────────────────────────────────────
-  # 2. LINUX (Passing)
+  # 2. LINUX
   # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
@@ -443,7 +451,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band
 
   # ─────────────────────────────────────────────
-  # 3. WINDOWS (Passing)
+  # 3. WINDOWS
   # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
@@ -474,7 +482,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.exe
 
   # ─────────────────────────────────────────────
-  # 4. macOS (Passing)
+  # 4. macOS
   # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
@@ -507,12 +515,12 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — Fully Fixed for JDK, NDK, ProGuard, & AGP
+  # 5. ANDROID — Fully Fixed for JDK, NDK, ProGuard, AGP, & Gradle Wrapper
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
-    continue-on-error: true # Remove this once the build is confirmed stable
+    continue-on-error: true
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -565,37 +573,37 @@ jobs:
       # 4. Create Projucer project with exact NDK version defined
       - name: Create Projucer Project
         run: |
-          cat > AILiveBand.jucer << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"
-                        version="0.1.0" companyName="AILiveBand"
-                        platform="android" buildVST="0" buildAU="0" buildVST3="0"
-                        buildStandalone="1" buildiOS="0" buildAndroid="1"
-                        androidMinimumSDK="24" androidTargetSDK="34">
-            <MAINGROUP id="AILiveBand" name="AI Live Band">
-              <GROUP id="Source" name="Source">
-                <FILE id="Main_cpp" name="Main.cpp" compile="1" resource="0"
-                      file="Source/Main.cpp"/>
-                <FILE id="MainComponent_cpp" name="MainComponent.cpp" compile="1"
-                      resource="0" file="Source/MainComponent.cpp"/>
-                <FILE id="PitchDetector_cpp" name="PitchDetector.cpp" compile="1"
-                      resource="0" file="Source/PitchDetector.cpp"/>
-                <FILE id="ChordInference_cpp" name="ChordInference.cpp" compile="1"
-                      resource="0" file="Source/ChordInference.cpp"/>
-              </GROUP>
-            </MAINGROUP>
-            <EXPORTFORMATS>
-              <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">
-                <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" optimisation="1"
-                                 targetName="AI Live Band"/>
-                  <CONFIGURATION name="Release" isDebug="0" optimisation="3"
-                                 targetName="AI Live Band"/>
-                </CONFIGURATIONS>
-              </ANDROIDSTUDIO>
-            </EXPORTFORMATS>
-          </JUCERPROJECT>
-          EOF
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"' \
+            '              version="0.1.0" companyName="AILiveBand"' \
+            '              platform="android" buildVST="0" buildAU="0" buildVST3="0"' \
+            '              buildStandalone="1" buildiOS="0" buildAndroid="1"' \
+            '              androidMinimumSDK="24" androidTargetSDK="34">' \
+            '  <MAINGROUP id="AILiveBand" name="AI Live Band">' \
+            '    <GROUP id="Source" name="Source">' \
+            '      <FILE id="Main_cpp" name="Main.cpp" compile="1" resource="0"' \
+            '            file="Source/Main.cpp"/>' \
+            '      <FILE id="MainComponent_cpp" name="MainComponent.cpp" compile="1"' \
+            '            resource="0" file="Source/MainComponent.cpp"/>' \
+            '      <FILE id="PitchDetector_cpp" name="PitchDetector.cpp" compile="1"' \
+            '            resource="0" file="Source/PitchDetector.cpp"/>' \
+            '      <FILE id="ChordInference_cpp" name="ChordInference.cpp" compile="1"' \
+            '            resource="0" file="Source/ChordInference.cpp"/>' \
+            '    </GROUP>' \
+            '  </MAINGROUP>' \
+            '  <EXPORTFORMATS>' \
+            '    <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">' \
+            '      <CONFIGURATIONS>' \
+            '        <CONFIGURATION name="Debug" isDebug="1" optimisation="1"' \
+            '                       targetName="AI Live Band"/>' \
+            '        <CONFIGURATION name="Release" isDebug="0" optimisation="3"' \
+            '                       targetName="AI Live Band"/>' \
+            '      </CONFIGURATIONS>' \
+            '    </ANDROIDSTUDIO>' \
+            '  </EXPORTFORMATS>' \
+            '</JUCERPROJECT>' \
+            > AILiveBand.jucer
 
       - name: Generate Android Studio Project
         run: |
@@ -603,7 +611,7 @@ jobs:
           JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer \
             --resave AILiveBand.jucer
 
-      # 5. Configure Gradle: AGP upgrade, JDK home, ProGuard rules, remove deprecated flags
+      # 5. Configure Gradle: AGP upgrade, JDK home, Gradle wrapper version, ProGuard rules, remove deprecated flags
       - name: Configure Gradle Project
         working-directory: Builds/Android
         run: |
@@ -618,18 +626,21 @@ jobs:
           # Force Gradle to use JDK 17 (fixes "Process 'command ... finished with non-zero exit value 1")
           echo "org.gradle.java.home=$JAVA_HOME_17_X64" >> gradle.properties
 
+          # FIX: Update Gradle Wrapper to 8.7 to satisfy AGP 8.5.1's minimum requirement
+          sed -i 's|distributionUrl=.*gradle-.*-all.zip|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-all.zip|' gradle/wrapper/gradle-wrapper.properties
+
           # Remove deprecated ARM mode flag that breaks modern NDK
           sed -i 's/-DANDROID_ARM_MODE=arm//g' app/build.gradle
           sed -i 's/-DANDROID_ARM_MODE=arm//g' build.gradle
 
           # Add ProGuard rules to prevent JUCE JNI class stripping
-          cat > app/proguard-rules.pro << 'EOF'
-          -keep class com.rmsl.juce.** { *; }
-          -keepclassmembers class com.rmsl.juce.** { *; }
-          -keep interface com.rmsl.juce.** { *; }
-          -keepclasseswithmembernames class * { native <methods>; }
-          -keep class * extends android.app.Application { *; }
-          EOF
+          printf '%s\n' \
+            '-keep class com.rmsl.juce.** { *; }' \
+            '-keepclassmembers class com.rmsl.juce.** { *; }' \
+            '-keep interface com.rmsl.juce.** { *; }' \
+            '-keepclasseswithmembernames class * { native <methods>; }' \
+            '-keep class * extends android.app.Application { *; }' \
+            > app/proguard-rules.pro
 
           # Enable ProGuard for release builds
           sed -i 's/minifyEnabled false/minifyEnabled true/g' app/build.gradle
