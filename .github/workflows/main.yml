@@ -520,7 +520,6 @@ jobs:
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -592,6 +591,20 @@ jobs:
             '            resource="0" file="Source/ChordInference.cpp"/>' \
             '    </GROUP>' \
             '  </MAINGROUP>' \
+            '  <MODULES>' \
+            '    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>' \
+            '    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>' \
+            '  </MODULES>' \
             '  <EXPORTFORMATS>' \
             '    <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">' \
             '      <CONFIGURATIONS>' \
@@ -615,9 +628,8 @@ jobs:
       - name: Configure Gradle Project
         working-directory: Builds/Android
         run: |
-          # Set SDK and NDK paths
+          # Set SDK path only (ndk.dir is deprecated, Projucer handles ndkVersion)
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/26.2.11394342" >> local.properties
 
           # Upgrade AGP to 8.5.1 for PlayStore compliance
           sed -i 's/com.android.tools.build:gradle:[0-9]\+\.[0-9]\+\.[0-9]\+/com.android.tools.build:gradle:8.5.1/g' build.gradle
@@ -651,6 +663,7 @@ jobs:
         run: |
           ./gradlew clean
           rm -rf .gradle
+          rm -rf app/.cxx
 
       - name: Build APK with Gradle
         working-directory: Builds/Android
