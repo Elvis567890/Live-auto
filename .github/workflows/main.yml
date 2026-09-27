@@ -566,13 +566,15 @@ jobs:
       - name: Download JUCE
         run: |
           git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git JUCE
+          # Calculate absolute path for JUCE modules
+          echo "JUCE_MODULES_PATH=$(pwd)/JUCE/modules" >> $GITHUB_ENV
 
       - name: Build Projucer
         run: |
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
           make CXXFLAGS="-Wno-error" -j$(nproc)
 
-      # 4. Create Projucer project with minSdk 21 for older devices
+      # 4. Create Projucer project with absolute module paths and minSdk 21
       - name: Create Projucer Project
         run: |
           printf '%s\n' \
@@ -595,18 +597,18 @@ jobs:
             '    </GROUP>' \
             '  </MAINGROUP>' \
             '  <MODULES>' \
-            '    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
-            '    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="JUCE/modules"/>' \
+            '    <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
+            '    <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="'"$JUCE_MODULES_PATH"'"/>' \
             '  </MODULES>' \
             '  <EXPORTFORMATS>' \
             '    <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">' \
