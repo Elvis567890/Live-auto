@@ -487,7 +487,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — FINAL FIX: NAMESPACE IN MANIFEST
+  # 5. ANDROID — SKIP PROJUCER, USE PURE GROOVY GRADLE
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -519,8 +519,9 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
+          echo "CMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/26.2.11394342/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
 
-      - name: Install Linux deps for Projucer
+      - name: Install Linux deps
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -530,78 +531,10 @@ jobs:
             libglu1-mesa-dev mesa-common-dev libcurl4-openssl-dev \
             libgtk-3-dev libwebkit2gtk-4.1-dev
 
-      - name: Download JUCE
-        run: |
-          git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git JUCE
-          test -f JUCE/modules/juce_core/juce_core.h && echo "OK" || exit 1
-
-      - name: Build Projucer
-        run: |
-          cd JUCE/extras/Projucer/Builds/LinuxMakefile
-          make CXXFLAGS="-Wno-error" -j$(nproc)
-
       # ─────────────────────────────────────────────
-      # STEP A: Try Projucer
+      # BUILD ANDROID PROJECT FROM SCRATCH (SKIP PROJUCER)
       # ─────────────────────────────────────────────
-      - name: Create Projucer Project (Attempt 1)
-        id: projucer_attempt
-        continue-on-error: true
-        run: |
-          JUCE_MODULES_ABS=$(realpath JUCE/modules)
-          echo "Path: $JUCE_MODULES_ABS"
-
-          for module in juce_audio_basics juce_audio_devices juce_audio_formats juce_audio_processors juce_audio_utils juce_core juce_data_structures juce_dsp juce_events juce_graphics juce_gui_basics juce_gui_extra; do
-            test -f "$JUCE_MODULES_ABS/$module/$module.h" || exit 1
-          done
-
-          cat > AILiveBand.jucer <<JUCEREOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"
-                        version="0.1.0" companyName="AILiveBand"
-                        platform="android" buildVST="0" buildAU="0" buildVST3="0"
-                        buildStandalone="1" buildiOS="0" buildAndroid="1"
-                        androidMinimumSDK="21" androidTargetSDK="34">
-            <MAINGROUP id="AILiveBand" name="AI Live Band">
-              <GROUP id="Source" name="Source">
-                <FILE id="Main_cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
-                <FILE id="MainComponent_cpp" name="MainComponent.cpp" compile="1" resource="0" file="Source/MainComponent.cpp"/>
-                <FILE id="PitchDetector_cpp" name="PitchDetector.cpp" compile="1" resource="0" file="Source/PitchDetector.cpp"/>
-                <FILE id="ChordInference_cpp" name="ChordInference.cpp" compile="1" resource="0" file="Source/ChordInference.cpp"/>
-              </GROUP>
-            </MAINGROUP>
-            <MODULES>
-              <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
-            </MODULES>
-            <EXPORTFORMATS>
-              <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">
-                <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" optimisation="1" targetName="AI Live Band"/>
-                  <CONFIGURATION name="Release" isDebug="0" optimisation="3" targetName="AI Live Band"/>
-                </CONFIGURATIONS>
-              </ANDROIDSTUDIO>
-            </EXPORTFORMATS>
-          </JUCERPROJECT>
-          JUCEREOF
-
-          chmod +x JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer
-          ./JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer --resave AILiveBand.jucer
-
-      # ─────────────────────────────────────────────
-      # STEP B: Manual fallback
-      # ─────────────────────────────────────────────
-      - name: Build Android Studio Project Manually (Fallback)
-        if: steps.projucer_attempt.outcome == 'failure'
+      - name: Build Android Project From Scratch
         run: |
           mkdir -p Builds/Android/app/src/main/java/com/rmsl/juce
           mkdir -p Builds/Android/gradle/wrapper
@@ -609,19 +542,32 @@ jobs:
 
           cd Builds/Android
 
+          # settings.gradle
           cat > settings.gradle <<'EOF'
           rootProject.name = "AILiveBand"
           include ':app'
           EOF
 
+          # Root build.gradle (Groovy, no Kotlin)
           cat > build.gradle <<'EOF'
           buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.5.1' }
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.5.1'
+              }
           }
-          allprojects { repositories { google(); mavenCentral() } }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
           EOF
 
+          # app/build.gradle (Groovy, no Kotlin)
           cat > app/build.gradle <<'EOF'
           apply plugin: 'com.android.application'
 
@@ -637,12 +583,15 @@ jobs:
                   versionCode 1
                   versionName "0.1.0"
 
-                  ndk { abiFilters "armeabi-v7a", "arm64-v8a" }
+                  ndk {
+                      abiFilters "armeabi-v7a", "arm64-v8a"
+                  }
 
                   externalNativeBuild {
                       cmake {
                           cppFlags "-std=c++17 -fexceptions -frtti"
-                          arguments "-DANDROID_STL=c++_shared", "-DJUCE_ANDROID=1"
+                          arguments "-DANDROID_STL=c++_shared",
+                                    "-DANDROID_PLATFORM=android-21"
                       }
                   }
               }
@@ -665,48 +614,93 @@ jobs:
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
+
+              packagingOptions {
+                  jniLibs {
+                      useLegacyPackaging = false
+                  }
+              }
           }
 
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
           EOF
 
+          # CMake for Android (uses FetchContent for JUCE - no path dependency)
           cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
+
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
           include(FetchContent)
-          FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG 8.0.4 GIT_SHALLOW TRUE)
+          FetchContent_Declare(
+            JUCE
+            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+            GIT_TAG 8.0.4
+            GIT_SHALLOW TRUE
+          )
           FetchContent_MakeAvailable(JUCE)
-          juce_add_gui_app(AILiveBand PRODUCT_NAME "AI Live Band" COMPANY_NAME "AILiveBand" VERSION "0.1.0")
+
+          juce_add_gui_app(AILiveBand
+            PRODUCT_NAME "AI Live Band"
+            COMPANY_NAME "AILiveBand"
+            VERSION "0.1.0"
+            ANDROID_VERSION_CODE 1
+            ANDROID_VERSION_NAME "0.1.0"
+            ANDROID_PACKAGE_NAME "com.rmsl.juce.AILiveBand"
+            ANDROID_MIN_SDK_VERSION 21
+            ANDROID_TARGET_SDK_VERSION 34
+          )
+
           juce_generate_juce_header(AILiveBand)
+
           target_sources(AILiveBand PRIVATE
             ../../../../../../Source/Main.cpp
             ../../../../../../Source/MainComponent.cpp
             ../../../../../../Source/PitchDetector.cpp
             ../../../../../../Source/ChordInference.cpp
           )
+
           target_compile_definitions(AILiveBand PRIVATE
-            JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_DISPLAY_SPLASH_SCREEN=0
+            JUCE_WEB_BROWSER=0
+            JUCE_USE_CURL=0
+            JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
             JUCE_ANDROID_USE_AAUDIO=0
           )
+
           target_link_libraries(AILiveBand PRIVATE
-            juce::juce_audio_utils juce::juce_audio_devices juce::juce_dsp juce::juce_gui_extra
-            PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_dsp
+            juce::juce_gui_extra
+            PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
           )
           EOF
 
-          # FIXED: No 'package=' attribute - AGP 8.x uses namespace from build.gradle
+          # AndroidManifest.xml (NO package attribute - AGP 8.x requirement)
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-              <application android:label="AI Live Band" android:hasCode="true" android:allowBackup="false">
-                  <activity android:name="com.rmsl.juce.JuceAppActivity" android:exported="true"
-                            android:launchMode="singleTask" android:screenOrientation="landscape"
-                            android:configChanges="orientation|keyboardHidden|screenSize">
+              <uses-feature android:name="android.hardware.audio.output" android:required="false"/>
+              <application
+                  android:label="AI Live Band"
+                  android:hasCode="true"
+                  android:allowBackup="false"
+                  android:hardwareAccelerated="true">
+                  <activity
+                      android:name="com.rmsl.juce.JuceAppActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:screenOrientation="landscape"
+                      android:configChanges="orientation|keyboardHidden|screenSize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
@@ -716,6 +710,7 @@ jobs:
           </manifest>
           EOF
 
+          # JUCE Android entry point - JuceAppActivity
           cat > app/src/main/java/com/rmsl/juce/JuceAppActivity.java <<'EOF'
           package com.rmsl.juce;
           import android.app.Activity;
@@ -726,21 +721,28 @@ jobs:
           }
           EOF
 
+          # ProGuard rules
           cat > app/proguard-rules.pro <<'EOF'
           -keep class com.rmsl.juce.** { *; }
           -keepclasseswithmembernames class * { native <methods>; }
+          -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
           EOF
 
+          # local.properties
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ndk.dir=$ANDROID_HOME/ndk/26.2.11394342" >> local.properties
 
+          # gradle.properties
           cat > gradle.properties <<EOF
           android.useAndroidX=true
           android.enableJetifier=true
           org.gradle.java.home=$JAVA_HOME_17_X64
+          org.gradle.jvmargs=-Xmx4096m
           android.ndkVersion=26.2.11394342
+          android.suppressUnsupportedCompileSdk=34
           EOF
 
+          # gradle wrapper properties
           cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -749,62 +751,39 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-      # ─────────────────────────────────────────────
-      # STEP C: If Projucer succeeded, remove the invalid package attribute anyway
-      # ─────────────────────────────────────────────
-      - name: Fix AndroidManifest.xml (remove package attribute)
-        if: success()
-        working-directory: Builds/Android
-        run: |
-          if [ -f "app/src/main/AndroidManifest.xml" ]; then
-            echo "=== Original manifest ==="
-            cat app/src/main/AndroidManifest.xml
-            # Remove the package= attribute (AGP 8.x requirement)
-            sed -i 's/ package="[^"]*"//g' app/src/main/AndroidManifest.xml
-            echo "=== Fixed manifest ==="
-            cat app/src/main/AndroidManifest.xml
-          fi
-
-      - name: Ensure Namespace is in build.gradle
-        if: success()
-        working-directory: Builds/Android
-        run: |
-          if [ -f "app/build.gradle" ]; then
-            if ! grep -q "namespace" app/build.gradle; then
-              echo "Adding namespace to app/build.gradle..."
-              sed -i "/android {/a\\    namespace 'com.rmsl.juce.AILiveBand'" app/build.gradle
-            fi
-            echo "=== app/build.gradle namespace ==="
-            grep "namespace" app/build.gradle
-          fi
+          echo "=== Project structure ==="
+          find . -type f -name "*.gradle" -o -name "*.xml" -o -name "*.java" -o -name "*.properties" | sort
 
       # ─────────────────────────────────────────────
-      # Generate gradlew wrapper if missing
+      # Generate Gradle wrapper
       # ─────────────────────────────────────────────
       - name: Generate Gradle Wrapper
-        if: success()
         working-directory: Builds/Android
         run: |
-          if [ ! -f "gradlew" ]; then
-            echo "gradlew not found - installing system gradle"
-            GRADLE_VERSION=8.7
-            wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -O /tmp/gradle.zip
-            unzip -q /tmp/gradle.zip -d /opt/
-            export PATH="/opt/gradle-${GRADLE_VERSION}/bin:$PATH"
-            gradle wrapper --gradle-version ${GRADLE_VERSION} --distribution-type bin
-          fi
+          wget -q "https://services.gradle.org/distributions/gradle-8.7-bin.zip" -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt/
+          export PATH="/opt/gradle-8.7/bin:$PATH"
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
           chmod +x gradlew
-          test -f "gradle/wrapper/gradle-wrapper.jar" || exit 1
-          echo "gradlew is ready"
+          test -f "gradle/wrapper/gradle-wrapper.jar" && echo "Wrapper OK" || exit 1
+
+      - name: Verify Project Setup
+        working-directory: Builds/Android
+        run: |
+          echo "=== Files present ==="
+          ls -la          echo ""
+          echo "=== app/build.gradle ==="
+          cat app/build.gradle
+          echo ""
+          echo "=== AndroidManifest.xml ==="
+          cat app/src/main/AndroidManifest.xml
 
       - name: Clean Gradle caches
-        if: success()
         working-directory: Builds/Android
         run: |
           rm -rf .gradle app/.cxx build app/build || true
 
       - name: Build APK with Gradle
-        if: success()
         working-directory: Builds/Android
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.2.11394342
@@ -814,12 +793,14 @@ jobs:
           ./gradlew app:assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
 
       - name: Verify APK was created
-        if: success()
+        if: always()
         run: |
+          echo "=== Searching for APK files ==="
           find Builds/Android -name "*.apk" -type f
           APK_COUNT=$(find Builds/Android -name "*.apk" -type f | wc -l)
           if [ "$APK_COUNT" -eq 0 ]; then
             echo "FATAL: No APK generated"
+            echo "=== Last 200 lines of Gradle log ==="
             tail -200 /tmp/gradle.log
             exit 1
           fi
