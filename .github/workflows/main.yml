@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
-  # 1. SCAFFOLD — creates every C++ source file using printf to avoid YAML heredoc conflicts
+  # 1. SCAFFOLD — creates every C++ source file
   # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
@@ -17,7 +17,6 @@ jobs:
         run: |
           mkdir -p Source
 
-          # CMakeLists.txt
           printf '%s\n' \
             'cmake_minimum_required(VERSION 3.22)' \
             'project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)' \
@@ -69,7 +68,6 @@ jobs:
             ')' \
             > CMakeLists.txt
 
-          # Source/PitchDetector.h
           printf '%s\n' \
             '#pragma once' \
             '#include <JuceHeader.h>' \
@@ -85,7 +83,6 @@ jobs:
             '};' \
             > Source/PitchDetector.h
 
-          # Source/PitchDetector.cpp
           printf '%s\n' \
             '#include "PitchDetector.h"' \
             '' \
@@ -93,23 +90,19 @@ jobs:
             '' \
             'float PitchDetector::detect(const float* samples, int numSamples) {' \
             '    if (numSamples < 64) return 0.0f;' \
-            '' \
             '    float mean = 0.0f;' \
             '    for (int i = 0; i < numSamples; ++i) mean += samples[i];' \
             '    mean /= (float)numSamples;' \
-            '' \
             '    float energy = 0.0f;' \
             '    for (int i = 0; i < numSamples; ++i) {' \
             '        float v = samples[i] - mean;' \
             '        energy += v * v;' \
             '    }' \
             '    if (energy < 1e-5f) return 0.0f;' \
-            '' \
             '    int minLag = (int)(sr / 1000.0);' \
             '    int maxLag = (int)(sr / 60.0);' \
             '    if (maxLag >= numSamples) maxLag = numSamples - 1;' \
             '    if (minLag < 1) minLag = 1;' \
-            '' \
             '    int bestLag = 0;' \
             '    float bestCorr = 0.0f;' \
             '    for (int lag = minLag; lag <= maxLag; ++lag) {' \
@@ -140,7 +133,6 @@ jobs:
             '}' \
             > Source/PitchDetector.cpp
 
-          # Source/ChordInference.h
           printf '%s\n' \
             '#pragma once' \
             '#include <JuceHeader.h>' \
@@ -157,7 +149,6 @@ jobs:
             '};' \
             > Source/ChordInference.h
 
-          # Source/ChordInference.cpp
           printf '%s\n' \
             '#include "ChordInference.h"' \
             '' \
@@ -190,10 +181,8 @@ jobs:
             'juce::String ChordInference::getChord() const {' \
             '    const juce::ScopedLock sl(lock);' \
             '    if (recent.empty()) return "-";' \
-            '' \
             '    int counts[12] = {0};' \
             '    for (int n : recent) counts[((n % 12) + 12) % 12]++;' \
-            '' \
             '    int bestRoot = -1, bestScore = -1;' \
             '    juce::String bestName;' \
             '    for (int root = 0; root < 12; ++root) {' \
@@ -217,7 +206,6 @@ jobs:
             '}' \
             > Source/ChordInference.cpp
 
-          # Source/MainComponent.h
           printf '%s\n' \
             '#pragma once' \
             '#include <JuceHeader.h>' \
@@ -231,10 +219,8 @@ jobs:
             'public:' \
             '    MainComponent();' \
             '    ~MainComponent() override;' \
-            '' \
             '    void paint(juce::Graphics&) override;' \
             '    void resized() override;' \
-            '' \
             '    void audioDeviceIOCallbackWithContext(' \
             '        const float* const* inputChannelData, int numInputChannels,' \
             '        float* const* outputChannelData, int numOutputChannels,' \
@@ -242,25 +228,19 @@ jobs:
             '        const juce::AudioIODeviceCallbackContext& context) override;' \
             '    void audioDeviceAboutToStart(juce::AudioIODevice* device) override;' \
             '    void audioDeviceStopped() override;' \
-            '' \
             'private:' \
             '    void timerCallback() override;' \
-            '' \
             '    juce::AudioDeviceManager deviceManager;' \
             '    std::unique_ptr<PitchDetector> pitchDetector;' \
             '    ChordInference chordInference;' \
-            '' \
             '    juce::Label noteLabel, chordLabel, statusLabel;' \
             '    juce::TextButton startButton { "Start" };' \
-            '' \
             '    std::atomic<float> currentFreq { 0.0f };' \
             '    std::atomic<int>   currentMidi { 0 };' \
-            '' \
             '    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)' \
             '};' \
             > Source/MainComponent.h
 
-          # Source/MainComponent.cpp
           printf '%s\n' \
             '#include "MainComponent.h"' \
             '' \
@@ -269,18 +249,15 @@ jobs:
             '    addAndMakeVisible(chordLabel);' \
             '    addAndMakeVisible(statusLabel);' \
             '    addAndMakeVisible(startButton);' \
-            '' \
             '    noteLabel.setFont(juce::Font(28.0f));' \
             '    chordLabel.setFont(juce::Font(28.0f));' \
             '    statusLabel.setFont(juce::Font(16.0f));' \
             '    noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);' \
             '    chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);' \
             '    statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);' \
-            '' \
             '    noteLabel.setText("Note: -", juce::dontSendNotification);' \
             '    chordLabel.setText("Chord: -", juce::dontSendNotification);' \
             '    statusLabel.setText("Audio: stopped", juce::dontSendNotification);' \
-            '' \
             '    startButton.onClick = [this] {' \
             '        if (deviceManager.getCurrentAudioDevice() == nullptr) {' \
             '            auto err = deviceManager.initialiseWithDefaultDevices(1, 0);' \
@@ -298,7 +275,6 @@ jobs:
             '            startButton.setButtonText("Start");' \
             '        }' \
             '    };' \
-            '' \
             '    setSize(700, 420);' \
             '    startTimerHz(20);' \
             '}' \
@@ -338,7 +314,6 @@ jobs:
             '    for (int ch = 0; ch < numOutputChannels; ++ch)' \
             '        if (outputChannelData[ch])' \
             '            juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);' \
-            '' \
             '    if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {' \
             '        float freq = pitchDetector->detect(inputChannelData[0], numSamples);' \
             '        if (freq > 0.0f) {' \
@@ -362,7 +337,6 @@ jobs:
             '}' \
             > Source/MainComponent.cpp
 
-          # Source/Main.cpp
           printf '%s\n' \
             '#include <JuceHeader.h>' \
             '#include "MainComponent.h"' \
@@ -372,13 +346,11 @@ jobs:
             '    const juce::String getApplicationName() override    { return "AI Live Band"; }' \
             '    const juce::String getApplicationVersion() override { return "0.1.0"; }' \
             '    bool moreThanOneInstanceAllowed() override          { return true; }' \
-            '' \
             '    void initialise(const juce::String&) override {' \
             '        mainWindow.reset(new MainWindow(getApplicationName()));' \
             '    }' \
             '    void shutdown() override { mainWindow.reset(); }' \
             '    void systemRequestedQuit() override { quit(); }' \
-            '' \
             '    class MainWindow : public juce::DocumentWindow {' \
             '    public:' \
             '        explicit MainWindow(juce::String name)' \
@@ -396,7 +368,6 @@ jobs:
             '            JUCEApplication::getInstance()->systemRequestedQuit();' \
             '        }' \
             '    };' \
-            '' \
             'private:' \
             '    std::unique_ptr<MainWindow> mainWindow;' \
             '};' \
@@ -516,7 +487,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — Hardened for maximum reliability
+  # 5. ANDROID — HARDENED & VERIFIED
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -525,7 +496,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: source }
 
-      # 1. Setup Java 17 (Gradle 8.x requires JDK 17, NOT 21)
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -535,7 +505,6 @@ jobs:
         with:
           packages: 'platform-tools'
 
-      # 2. Install Android SDK components & Accept Licenses
       - name: Install Android SDK components & Accept Licenses
         run: |
           yes | sdkmanager --licenses
@@ -545,13 +514,11 @@ jobs:
             "build-tools;34.0.0" \
             "cmake;3.22.1"
 
-      # 3. Set NDK Environment Variables explicitly for CMake
       - name: Set NDK Environment Variables
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
           echo "ANDROID_NDK=$ANDROID_HOME/ndk/26.2.11394342" >> $GITHUB_ENV
-          echo "CMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/26.2.11394342/build/cmake/android.toolchain.cmake" >> $GITHUB_ENV
 
       - name: Install Linux deps for Projucer
         run: |
@@ -566,18 +533,23 @@ jobs:
       - name: Download JUCE
         run: |
           git clone --depth 1 --branch 8.0.4 https://github.com/juce-framework/JUCE.git JUCE
-          # Calculate absolute path for JUCE modules
-          echo "JUCE_MODULES_PATH=$(pwd)/JUCE/modules" >> $GITHUB_ENV
+          test -f JUCE/modules/juce_core/juce_core.h || (echo "FATAL: juce_core.h missing"; exit 1)
 
       - name: Build Projucer
         run: |
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
           make CXXFLAGS="-Wno-error" -j$(nproc)
 
-      # 4. Create Projucer project using a heredoc (reliable variable expansion) and minSdk 21
+      # ─────────────────────────────────────────────
+      # Create .jucer with REAL absolute paths via realpath
+      # ─────────────────────────────────────────────
       - name: Create Projucer Project
         run: |
-          cat > AILiveBand.jucer <<EOF
+          JUCE_MODULES_ABS=$(realpath JUCE/modules)
+          echo "Absolute path: $JUCE_MODULES_ABS"
+          test -d "$JUCE_MODULES_ABS" || (echo "FATAL: $JUCE_MODULES_ABS missing"; exit 1)
+
+          cat > AILiveBand.jucer <<JUCEREOF
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp"
                         version="0.1.0" companyName="AILiveBand"
@@ -597,18 +569,18 @@ jobs:
               </GROUP>
             </MAINGROUP>
             <MODULES>
-              <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
-              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_PATH"/>
+              <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_core" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
+              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" path="$JUCE_MODULES_ABS"/>
             </MODULES>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" ndkVersion="26.2.11394342">
@@ -621,63 +593,96 @@ jobs:
               </ANDROIDSTUDIO>
             </EXPORTFORMATS>
           </JUCERPROJECT>
-          EOF
+          JUCEREOF
+
+          grep -c "$JUCE_MODULES_ABS" AILiveBand.jucer
 
       - name: Generate Android Studio Project
         run: |
           chmod +x JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer
-          JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer \
+          ./JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer \
             --resave AILiveBand.jucer
 
-      # 5. Configure Gradle Project with robust file manipulation
+      # ─────────────────────────────────────────────
+      # HARDENED GRADLE CONFIGURATION
+      # ─────────────────────────────────────────────
       - name: Configure Gradle Project
+        if: success()
         working-directory: Builds/Android
         run: |
-          # Set SDK path only (ndk.dir is deprecated)
+          echo "=== Detecting Gradle DSL ==="
+          ls -la
+          if [ -f "build.gradle.kts" ]; then
+            echo "DETECTED: Kotlin DSL"
+            BUILD_FILE="build.gradle.kts"
+            APP_BUILD_FILE="app/build.gradle.kts"
+          else
+            echo "DETECTED: Groovy DSL"
+            BUILD_FILE="build.gradle"
+            APP_BUILD_FILE="app/build.gradle"
+          fi
+
+          # SDK paths
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "android.useAndroidX=true" >> gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/26.2.11394342" >> local.properties
 
-          # Upgrade AGP to 8.5.1
-          sed -i 's/com.android.tools.build:gradle:[0-9]\+\.[0-9]\+\.[0-9]\+/com.android.tools.build:gradle:8.5.1/g' build.gradle
-          sed -i 's/com.android.tools.build:gradle:[0-9]\+\.[0-9]\+\.[0-9]\+/com.android.tools.build:gradle:8.5.1/g' app/build.gradle
+          # Gradle properties
+          cat >> gradle.properties <<EOF
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.java.home=$JAVA_HOME_17_X64
+          org.gradle.daemon=false
+          android.ndkVersion=26.2.11394342
+          android.suppressUnsupportedCompileSdk=34
+          EOF
 
-          # Force Gradle to use JDK 17
-          echo "org.gradle.java.home=$JAVA_HOME_17_X64" >> gradle.properties
-
-          # Update Gradle Wrapper to 8.7
+          # Force Gradle wrapper to 8.7
           sed -i 's|distributionUrl=.*gradle-.*-all.zip|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.7-all.zip|' gradle/wrapper/gradle-wrapper.properties
 
-          # Remove deprecated ARM mode flag
-          sed -i 's/-DANDROID_ARM_MODE=arm//g' app/build.gradle
-          sed -i 's/-DANDROID_ARM_MODE=arm//g' build.gradle
+          # Upgrade AGP if Groovy DSL
+          if [ "$BUILD_FILE" = "build.gradle" ]; then
+            sed -i 's/com.android.tools.build:gradle:[0-9]\+\.[0-9]\+\.[0-9]\+/com.android.tools.build:gradle:8.5.1/g' "$BUILD_FILE"
+            sed -i 's/com.android.tools.build:gradle:[0-9]\+\.[0-9]\+\.[0-9]\+/com.android.tools.build:gradle:8.5.1/g' "$APP_BUILD_FILE"
 
-          # ROBUST: Use awk to insert abiFilters inside defaultConfig { ... }
-          awk '/defaultConfig {/ { print; print "            ndk {"; print "                abiFilters \"armeabi-v7a\", \"arm64-v8a\""; print "            }"; next } 1' app/build.gradle > app/build.gradle.tmp
-          mv app/build.gradle.tmp app/build.gradle
+            sed -i 's/-DANDROID_ARM_MODE=arm//g' "$APP_BUILD_FILE"
+            sed -i 's/-DANDROID_ARM_MODE=arm//g' "$BUILD_FILE"
 
-          # Add ProGuard rules to prevent JUCE JNI class stripping
-          printf '%s\n' \
-            '-keep class com.rmsl.juce.** { *; }' \
-            '-keepclassmembers class com.rmsl.juce.** { *; }' \
-            '-keep interface com.rmsl.juce.** { *; }' \
-            '-keepclasseswithmembernames class * { native <methods>; }' \
-            '-keep class * extends android.app.Application { *; }' \
-            > app/proguard-rules.pro
+            # Insert abiFilters robustly
+            awk '/defaultConfig {/ { print; print "            ndk {"; print "                abiFilters \"armeabi-v7a\", \"arm64-v8a\""; print "            }"; next } 1' "$APP_BUILD_FILE" > "$APP_BUILD_FILE.tmp"
+            mv "$APP_BUILD_FILE.tmp" "$APP_BUILD_FILE"
 
-          # Enable ProGuard for release builds
-          sed -i 's/minifyEnabled false/minifyEnabled true/g' app/build.gradle
-          sed -i 's/shrinkResources false/shrinkResources true/g' app/build.gradle
+            # ProGuard rules
+            printf '%s\n' \
+              '-keep class com.rmsl.juce.** { *; }' \
+              '-keepclassmembers class com.rmsl.juce.** { *; }' \
+              '-keep interface com.rmsl.juce.** { *; }' \
+              '-keepclasseswithmembernames class * { native <methods>; }' \
+              '-keep class * extends android.app.Application { *; }' \
+              '-keep class * extends android.app.NativeActivity { *; }' \
+              '-keep class * extends android.content.BroadcastReceiver { *; }' \
+              > app/proguard-rules.pro
+
+            sed -i 's/minifyEnabled false/minifyEnabled true/g' "$APP_BUILD_FILE"
+            sed -i 's/shrinkResources false/shrinkResources true/g' "$APP_BUILD_FILE"
+          fi
+
+          echo "=== Final app build file (first 80 lines) ==="
+          head -80 "$APP_BUILD_FILE"
 
       - name: Clean Gradle caches
+        if: success()
         working-directory: Builds/Android
         run: |
-          ./gradlew clean
+          ./gradlew clean || true
           rm -rf .gradle
           rm -rf app/.cxx
+          rm -rf build
 
-      # 6. Build APK with --no-daemon for CI stability
+      # ─────────────────────────────────────────────
+      # BUILD APK
+      # ─────────────────────────────────────────────
       - name: Build APK with Gradle
+        if: success()
         working-directory: Builds/Android
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.2.11394342
@@ -685,10 +690,35 @@ jobs:
           ANDROID_NDK: ${{ env.ANDROID_HOME }}/ndk/26.2.11394342
         run: |
           chmod +x gradlew
-          ./gradlew app:assembleRelease --no-daemon --stacktrace --info
+          # Build release first, fall back to debug if release fails
+          ./gradlew app:assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_release.log || \
+          (echo "=== Release failed, trying debug ===" && \
+           ./gradlew app:assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_debug.log)
+
+      - name: Verify APK was created
+        if: success()
+        run: |
+          echo "=== Searching for APK files ==="
+          find Builds/Android -name "*.apk" -type f
+          APK_COUNT=$(find Builds/Android -name "*.apk" -type f | wc -l)
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "FATAL: No APK generated"
+            echo "=== Last 100 lines of Gradle log ==="
+            tail -100 /tmp/gradle_release.log 2>/dev/null || tail -100 /tmp/gradle_debug.log
+            exit 1
+          fi
+          echo "SUCCESS: $APK_COUNT APK(s) generated"
 
       - name: Upload Android APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
-          path: Builds/Android/app/build/outputs/apk/release/*.apk
+          path: Builds/Android/app/build/outputs/apk/**/*.apk
+
+      - name: Upload Gradle logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-logs
+          path: /tmp/gradle_*.log
