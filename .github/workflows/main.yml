@@ -487,7 +487,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — WITH GRADLE WRAPPER FIX
+  # 5. ANDROID — FINAL FIX: NAMESPACE IN MANIFEST
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -540,6 +540,9 @@ jobs:
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
           make CXXFLAGS="-Wno-error" -j$(nproc)
 
+      # ─────────────────────────────────────────────
+      # STEP A: Try Projucer
+      # ─────────────────────────────────────────────
       - name: Create Projucer Project (Attempt 1)
         id: projucer_attempt
         continue-on-error: true
@@ -595,7 +598,7 @@ jobs:
           ./JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer --resave AILiveBand.jucer
 
       # ─────────────────────────────────────────────
-      # Manual fallback
+      # STEP B: Manual fallback
       # ─────────────────────────────────────────────
       - name: Build Android Studio Project Manually (Fallback)
         if: steps.projucer_attempt.outcome == 'failure'
@@ -623,7 +626,7 @@ jobs:
           apply plugin: 'com.android.application'
 
           android {
-              namespace 'com.rmsl.juce'
+              namespace 'com.rmsl.juce.AILiveBand'
               compileSdk 34
               ndkVersion "26.2.11394342"
 
@@ -695,9 +698,10 @@ jobs:
           )
           EOF
 
+          # FIXED: No 'package=' attribute - AGP 8.x uses namespace from build.gradle
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.rmsl.juce.AILiveBand">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO"/>
               <application android:label="AI Live Band" android:hasCode="true" android:allowBackup="false">
                   <activity android:name="com.rmsl.juce.JuceAppActivity" android:exported="true"
@@ -746,39 +750,52 @@ jobs:
           EOF
 
       # ─────────────────────────────────────────────
-      # CRITICAL FIX: Always generate the gradlew wrapper
+      # STEP C: If Projucer succeeded, remove the invalid package attribute anyway
       # ─────────────────────────────────────────────
-      - name: Generate Gradle Wrapper (gradlew script + jar)
+      - name: Fix AndroidManifest.xml (remove package attribute)
         if: success()
         working-directory: Builds/Android
         run: |
-          echo "=== Checking for existing gradlew ==="
-          ls -la
-          
+          if [ -f "app/src/main/AndroidManifest.xml" ]; then
+            echo "=== Original manifest ==="
+            cat app/src/main/AndroidManifest.xml
+            # Remove the package= attribute (AGP 8.x requirement)
+            sed -i 's/ package="[^"]*"//g' app/src/main/AndroidManifest.xml
+            echo "=== Fixed manifest ==="
+            cat app/src/main/AndroidManifest.xml
+          fi
+
+      - name: Ensure Namespace is in build.gradle
+        if: success()
+        working-directory: Builds/Android
+        run: |
+          if [ -f "app/build.gradle" ]; then
+            if ! grep -q "namespace" app/build.gradle; then
+              echo "Adding namespace to app/build.gradle..."
+              sed -i "/android {/a\\    namespace 'com.rmsl.juce.AILiveBand'" app/build.gradle
+            fi
+            echo "=== app/build.gradle namespace ==="
+            grep "namespace" app/build.gradle
+          fi
+
+      # ─────────────────────────────────────────────
+      # Generate gradlew wrapper if missing
+      # ─────────────────────────────────────────────
+      - name: Generate Gradle Wrapper
+        if: success()
+        working-directory: Builds/Android
+        run: |
           if [ ! -f "gradlew" ]; then
-            echo "gradlew not found - installing system gradle to generate wrapper"
-            
+            echo "gradlew not found - installing system gradle"
             GRADLE_VERSION=8.7
             wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -O /tmp/gradle.zip
             unzip -q /tmp/gradle.zip -d /opt/
             export PATH="/opt/gradle-${GRADLE_VERSION}/bin:$PATH"
-            
             gradle wrapper --gradle-version ${GRADLE_VERSION} --distribution-type bin
-            
-            echo "=== Wrapper generated ==="
-            ls -la gradlew gradle/wrapper/
-          else
-            echo "gradlew already exists"
           fi
-          
           chmod +x gradlew
-          
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "ERROR: gradle-wrapper.jar missing"
-            exit 1
-          fi
-          
-          echo "=== gradlew is ready ==="
+          test -f "gradle/wrapper/gradle-wrapper.jar" || exit 1
+          echo "gradlew is ready"
 
       - name: Clean Gradle caches
         if: success()
@@ -799,7 +816,6 @@ jobs:
       - name: Verify APK was created
         if: success()
         run: |
-          echo "=== Searching for APK files ==="
           find Builds/Android -name "*.apk" -type f
           APK_COUNT=$(find Builds/Android -name "*.apk" -type f | wc -l)
           if [ "$APK_COUNT" -eq 0 ]; then
