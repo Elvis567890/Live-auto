@@ -487,7 +487,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — FROM SCRATCH (NO PROJUCER)
+  # 5. ANDROID — FIXED CMAKE CONFIGURATION
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -585,7 +585,8 @@ jobs:
                       cmake {
                           cppFlags "-std=c++17 -fexceptions -frtti"
                           arguments "-DANDROID_STL=c++_shared",
-                                    "-DANDROID_PLATFORM=android-21"
+                                    "-DANDROID_PLATFORM=android-21",
+                                    "-DANDROID_ARM_NEON=TRUE"
                       }
                   }
               }
@@ -621,6 +622,7 @@ jobs:
           }
           EOF
 
+          # FIXED: Use SHARED library for Android (JUCE requirement)
           cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
@@ -675,6 +677,13 @@ jobs:
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
+
+          # Ensure it's a shared library for Android
+          if(ANDROID)
+            set_target_properties(AILiveBand PROPERTIES
+              LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}"
+            )
+          endif()
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
@@ -748,20 +757,6 @@ jobs:
           chmod +x gradlew
           test -f "gradle/wrapper/gradle-wrapper.jar" && echo "Wrapper OK" || exit 1
 
-      # DIAGNOSTIC ONLY — does not fail the build
-      - name: Verify Project Setup
-        working-directory: Builds/Android
-        continue-on-error: true
-        run: |
-          echo "=== Files present ==="
-          ls -la
-          echo ""
-          echo "=== app/build.gradle ==="
-          cat app/build.gradle
-          echo ""
-          echo "=== AndroidManifest.xml ==="
-          cat app/src/main/AndroidManifest.xml
-
       - name: Clean Gradle caches
         working-directory: Builds/Android
         run: |
@@ -785,6 +780,7 @@ jobs:
           if [ "$APK_COUNT" -eq 0 ]; then
             echo "FATAL: No APK generated"
             if [ -f /tmp/gradle.log ]; then
+              echo "=== Last 200 lines of Gradle log ==="
               tail -200 /tmp/gradle.log
             fi
             exit 1
