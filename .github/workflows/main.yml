@@ -17,6 +17,7 @@ jobs:
         run: |
           mkdir -p Source
 
+          # CMakeLists.txt for desktop (Linux/Windows/macOS)
           printf '%s\n' \
             'cmake_minimum_required(VERSION 3.22)' \
             'project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)' \
@@ -68,6 +69,7 @@ jobs:
             ')' \
             > CMakeLists.txt
 
+          # Source files
           printf '%s\n' \
             '#pragma once' \
             '#include <JuceHeader.h>' \
@@ -487,7 +489,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID — FIXED CMAKE CONFIGURATION
+  # 5. ANDROID — MANUAL CMAKE CONFIGURATION (BYPASS JUCE HELPERS)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -622,9 +624,10 @@ jobs:
           }
           EOF
 
-          # ============================================================
-          # THE FIX: Manually create the shared library for Android
-          # ============================================================
+          # ─────────────────────────────────────────────
+          # FIX: Manually configure CMake for Android
+          # Bypass JUCE's high-level helpers (juce_add_gui_app)
+          # ─────────────────────────────────────────────
           cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
@@ -632,6 +635,10 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+          # Set output directory explicitly for the shared library
+          set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI})
+
+          # Fetch JUCE
           include(FetchContent)
           FetchContent_Declare(
             JUCE
@@ -641,8 +648,10 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
+          # Manually create the shared library
           add_library(AILiveBand SHARED)
 
+          # Link JUCE modules
           target_link_libraries(AILiveBand PRIVATE
             juce::juce_audio_utils
             juce::juce_audio_devices
@@ -652,8 +661,10 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
+          # Generate JuceHeader.h (safe even on Android)
           juce_generate_juce_header(AILiveBand)
 
+          # Add source files
           target_sources(AILiveBand PRIVATE
             ../../../../../../Source/Main.cpp
             ../../../../../../Source/MainComponent.cpp
@@ -661,6 +672,7 @@ jobs:
             ../../../../../../Source/ChordInference.cpp
           )
 
+          # Required compile definitions
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
@@ -670,12 +682,6 @@ jobs:
             JUCE_ANDROID_USE_AAUDIO=0
             JUCE_ANDROID=1
           )
-
-          if(ANDROID)
-            set_target_properties(AILiveBand PROPERTIES
-              LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}"
-            )
-          endif()
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
