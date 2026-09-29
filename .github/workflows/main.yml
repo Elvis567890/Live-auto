@@ -586,7 +586,7 @@ jobs:
                           cppFlags "-std=c++17 -fexceptions -frtti"
                           arguments "-DANDROID_STL=c++_shared",
                                     "-DANDROID_PLATFORM=android-21",
-                                    "-DANDROID_ARM_NEON=TRUE"
+                                    "-DANDROID_ARM_NEON=ON"
                       }
                   }
               }
@@ -622,7 +622,9 @@ jobs:
           }
           EOF
 
-          # FIXED: Use SHARED library for Android (JUCE requirement)
+          # ============================================================
+          # THE FIX: Manually create the shared library for Android
+          # ============================================================
           cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
@@ -639,15 +641,15 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
-          juce_add_gui_app(AILiveBand
-            PRODUCT_NAME "AI Live Band"
-            COMPANY_NAME "AILiveBand"
-            VERSION "0.1.0"
-            ANDROID_VERSION_CODE 1
-            ANDROID_VERSION_NAME "0.1.0"
-            ANDROID_PACKAGE_NAME "com.rmsl.juce.AILiveBand"
-            ANDROID_MIN_SDK_VERSION 21
-            ANDROID_TARGET_SDK_VERSION 34
+          add_library(AILiveBand SHARED)
+
+          target_link_libraries(AILiveBand PRIVATE
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_dsp
+            juce::juce_gui_extra
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags
           )
 
           juce_generate_juce_header(AILiveBand)
@@ -666,19 +668,9 @@ jobs:
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
             JUCE_ANDROID_USE_AAUDIO=0
+            JUCE_ANDROID=1
           )
 
-          target_link_libraries(AILiveBand PRIVATE
-            juce::juce_audio_utils
-            juce::juce_audio_devices
-            juce::juce_dsp
-            juce::juce_gui_extra
-            PUBLIC
-            juce::juce_recommended_config_flags
-            juce::juce_recommended_warning_flags
-          )
-
-          # Ensure it's a shared library for Android
           if(ANDROID)
             set_target_properties(AILiveBand PROPERTIES
               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}"
