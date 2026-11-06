@@ -25,6 +25,11 @@ jobs:
 
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          
+          # Explicitly set the STL for Android
+          if(ANDROID)
+            set(CMAKE_ANDROID_STL c++_shared)
+          endif()
 
           include(FetchContent)
           FetchContent_Declare(
@@ -124,7 +129,8 @@ jobs:
 
                   externalNativeBuild {
                       cmake {
-                          arguments "-DANDROID_STL=c++_shared"
+                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24"
+                          cppFlags "-std=c++17"
                       }
                   }
                   ndk {
