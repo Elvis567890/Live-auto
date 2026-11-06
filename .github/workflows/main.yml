@@ -598,7 +598,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed juceaide target generation)
+  # 5. ANDROID (Isolated host build for juceaide)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -649,12 +649,19 @@ jobs:
       - name: Clean build directories
         run: rm -rf build build_host
 
-      - name: Build host juceaide
+      - name: Build host juceaide in isolation
         run: |
+          # Unset Android environment variables for the host build
+          unset ANDROID_NDK_HOME
+          unset ANDROID_HOME
+          unset ANDROID_SDK_ROOT
+          
           cmake -B build_host -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
             -DJUCE_BUILD_HELPER_TOOLS=ON
-          cmake --build build_host --target juceaide
+          cmake --build build_host --target juceaide --parallel
 
       - name: Build APK with Gradle (Debug)
         env:
