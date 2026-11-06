@@ -492,7 +492,7 @@ jobs:
             gradle/
 
   # ─────────────────────────────────────────────
-  # 2. LINUX (Fixed WebKit dependency)
+  # 2. LINUX
   # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
@@ -532,7 +532,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band
 
   # ─────────────────────────────────────────────
-  # 3. WINDOWS (Passing)
+  # 3. WINDOWS
   # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
@@ -563,7 +563,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.exe
 
   # ─────────────────────────────────────────────
-  # 4. macOS (Upgraded JUCE to fix macOS 15 SDK)
+  # 4. macOS
   # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
@@ -595,7 +595,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed SDK tools package issue)
+  # 5. ANDROID (Fixed Gradle version pinning)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -620,14 +620,16 @@ jobs:
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;25.2.9519653" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
 
-      - name: Setup Gradle
+      - name: Setup Gradle (Pin to version 8.0)
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.0
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.0
+        run: gradle wrapper --gradle-version 8.0 --distribution-type bin
 
       - name: Build APK with Gradle (Debug)
         env:
