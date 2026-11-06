@@ -25,11 +25,6 @@ jobs:
 
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
-          
-          # Explicitly set the STL for Android
-          if(ANDROID)
-            set(CMAKE_ANDROID_STL c++_shared)
-          endif()
 
           include(FetchContent)
           FetchContent_Declare(
@@ -129,12 +124,11 @@ jobs:
 
                   externalNativeBuild {
                       cmake {
-                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24"
+                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24", "-DJUCE_BUILD_HELPER_TOOLS=OFF"
                           cppFlags "-std=c++17"
                       }
                   }
                   ndk {
-                      // Build for all modern architectures (64-bit and 32-bit)
                       abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
                   }
               }
@@ -605,7 +599,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Multi-ABI support)
+  # 5. ANDROID (Fixed Helper Tools)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
