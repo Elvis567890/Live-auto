@@ -124,7 +124,7 @@ jobs:
 
                   externalNativeBuild {
                       cmake {
-                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24", "-DJUCE_BUILD_HELPER_TOOLS=OFF"
+                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24"
                           cppFlags "-std=c++17"
                       }
                   }
@@ -599,7 +599,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed Helper Tools)
+  # 5. ANDROID (Fixed host juceaide issue)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -641,10 +641,26 @@ jobs:
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.0.2 --distribution-type bin
 
+      - name: Build host juceaide
+        run: |
+          cmake -B build_host -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_BUILD_EXTRAS=ON
+          cmake --build build_host --target juceaide
+
       - name: Build APK with Gradle (Debug)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          mkdir -p build/AILiveBand_artefacts/Debug/arm64-v8a/extras/Build/juceaide
+          mkdir -p build/AILiveBand_artefacts/Debug/armeabi-v7a/extras/Build/juceaide
+          mkdir -p build/AILiveBand_artefacts/Debug/x86_64/extras/Build/juceaide
+          
+          JUCEAIDE_PATH=$(find build_host -name "juceaide" -type f | head -n 1)
+          
+          cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/arm64-v8a/extras/Build/juceaide/juceaide
+          cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/armeabi-v7a/extras/Build/juceaide/juceaide
+          cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/x86_64/extras/Build/juceaide/juceaide
+          
+          ./gradlew assembleDebug --stacktrace
 
       - name: Find APK
         id: find_apk
