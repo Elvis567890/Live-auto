@@ -68,7 +68,6 @@ jobs:
           )
           EOF
 
-          # Projucer project file for Android
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17">
@@ -95,6 +94,7 @@ jobs:
           </JUCERPROJECT>
           EOF
 
+          # C++ Source files (omitted for brevity, same as previous)
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -534,7 +534,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Projucer-based build)
+  # 5. ANDROID (Projucer-based build with full dependencies)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -553,7 +553,13 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfreetype6-dev libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxrandr-dev libxrender-dev libasound2-dev
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
+            libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+            libglu1-mesa-dev mesa-common-dev libegl-dev
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
