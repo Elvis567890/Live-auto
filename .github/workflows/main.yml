@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
-  # 1. SCAFFOLD — creates every C++ and Android file
+  # 1. SCAFFOLD — creates every C++ file and Projucer project
   # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
@@ -17,7 +17,6 @@ jobs:
         run: |
           mkdir -p Source
           mkdir -p gradle/wrapper
-          mkdir -p app/src/main
 
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
@@ -50,25 +49,13 @@ jobs:
             Source/ChordInference.cpp
           )
 
-          # Explicitly enable all required JUCE modules
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
             JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
-            JUCE_MODULE_AVAILABLE_juce_audio_utils=1
-            JUCE_MODULE_AVAILABLE_juce_audio_devices=1
-            JUCE_MODULE_AVAILABLE_juce_dsp=1
-            JUCE_MODULE_AVAILABLE_juce_gui_extra=1
           )
-
-          if(ANDROID)
-            target_compile_definitions(AILiveBand PRIVATE 
-              JUCE_ANDROID=1 
-              JUCE_ANDROID_API_VERSION=24
-            )
-          endif()
 
           target_link_libraries(AILiveBand PRIVATE
             juce::juce_audio_utils
@@ -81,91 +68,31 @@ jobs:
           )
           EOF
 
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.ailiveband.app">
-              <application android:label="AI Live Band" android:hasCode="true" android:allowBackup="true">
-                  <activity android:name="com.rmsl.juce.JuceAppActivity" android:exported="true" android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-          </manifest>
-          EOF
-
-          cat > settings.gradle << 'EOF'
-          include ':app'
-          EOF
-
-          cat > build.gradle << 'EOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.0'
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-
-          cat > app/build.gradle << 'EOF'
-          apply plugin: 'com.android.application'
-
-          android {
-              namespace 'com.ailiveband.app'
-              compileSdk 34
-              ndkVersion "26.3.11579264"
-
-              defaultConfig {
-                  applicationId "com.ailiveband.app"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "0.1.0"
-
-                  externalNativeBuild {
-                      cmake {
-                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24", "-DANDROID_CPP_FEATURES=rtti exceptions"
-                          cppFlags "-std=c++17 -frtti -fexceptions"
-                      }
-                  }
-                  ndk {
-                      abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
-              }
-
-              externalNativeBuild {
-                  cmake {
-                      path "../CMakeLists.txt"
-                      version "3.22.1"
-                  }
-              }
-          }
-          EOF
-
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0.2-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
+          # Projucer project file for Android
+          cat > AILiveBand.jucer << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17">
+            <MAINGROUP id="main-group" name="AILiveBand">
+              <GROUP id="source-group" name="Source">
+                <FILE id="main-cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+                <FILE id="main-component-h" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+                <FILE id="main-component-cpp" name="MainComponent.cpp" compile="1" resource="0" file="Source/MainComponent.cpp"/>
+                <FILE id="pitch-detector-h" name="PitchDetector.h" compile="0" resource="0" file="Source/PitchDetector.h"/>
+                <FILE id="pitch-detector-cpp" name="PitchDetector.cpp" compile="1" resource="0" file="Source/PitchDetector.cpp"/>
+                <FILE id="chord-inference-h" name="ChordInference.h" compile="0" resource="0" file="Source/ChordInference.h"/>
+                <FILE id="chord-inference-cpp" name="ChordInference.cpp" compile="1" resource="0" file="Source/ChordInference.cpp"/>
+              </GROUP>
+            </MAINGROUP>
+            <EXPORTFORMATS>
+              <ANDROID id="android-exporter" targetFolder="Builds/Android">
+                <CONFIGURATIONS>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" enablePluginBinaryCopyStep="0"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" enablePluginBinaryCopyStep="0" optimise="1"/>
+                </CONFIGURATIONS>
+                <MODULEPATHS/>
+              </ANDROID>
+            </EXPORTFORMATS>
+          </JUCERPROJECT>
           EOF
 
           cat > Source/PitchDetector.h << 'EOF'
@@ -501,11 +428,8 @@ jobs:
           name: source
           path: |
             CMakeLists.txt
+            AILiveBand.jucer
             Source/
-            build.gradle
-            settings.gradle
-            app/
-            gradle/
 
   # ─────────────────────────────────────────────
   # 2. LINUX
@@ -610,7 +534,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Upgraded to NDK 26)
+  # 5. ANDROID (Projucer-based build)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -626,16 +550,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Linux Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ninja-build pkg-config \
-            libasound2-dev libjack-jackd2-dev ladspa-sdk \
-            libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev \
-            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
-            libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
-            libglu1-mesa-dev mesa-common-dev libegl-dev
+          sudo apt-get install -y libfreetype6-dev libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxrandr-dev libxrender-dev libasound2-dev
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
@@ -647,62 +565,32 @@ jobs:
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
 
-      - name: Setup Gradle (Pin to version 8.0.2)
+      - name: Download Projucer
+        run: |
+          wget -q https://github.com/juce-framework/JUCE/releases/download/8.0.6/juce-8.0.6-linux.zip -O juce.zip
+          unzip -q juce.zip
+          cd JUCE/extras/Projucer/Builds/LinuxMakefile
+          make -j$(nproc) CONFIG=Release
+          cd ../../../../..
+          echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
+
+      - name: Resolve Projucer dependencies
+        run: |
+          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.0.2
 
-      - name: Create local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.0.2 --distribution-type bin
-
-      - name: Clean build directories
-        run: rm -rf build build_host
-
-      - name: Build host juceaide in isolation
-        run: |
-          # Unset Android environment variables for the host build
-          unset ANDROID_NDK_HOME
-          unset ANDROID_HOME
-          unset ANDROID_SDK_ROOT
-          
-          cmake -B build_host -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=gcc \
-            -DCMAKE_CXX_COMPILER=g++ \
-            -DJUCE_BUILD_HELPER_TOOLS=ON
-          cmake --build build_host --target juceaide --parallel
-
-      - name: Build APK with Gradle (Debug) and capture log
-        id: build_apk
+      - name: Build APK
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
         run: |
-          # Locate the freshly built host juceaide binary
-          JUCEAIDE_PATH=$(find build_host -name "juceaide" -type f | head -n 1)
-          echo "Found juceaide at: $JUCEAIDE_PATH"
-          
-          # Copy it into the exact paths where CMake expects it for each Android ABI
-          for ABI in arm64-v8a armeabi-v7a x86_64; do
-            mkdir -p build/AILiveBand_artefacts/Debug/$ABI/extras/Build/juceaide
-            cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/$ABI/extras/Build/juceaide/juceaide
-          done
-
-          # Run build and tee output to log file, preserving exit code
-          set +e
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
-          exit ${PIPESTATUS[0]}
-
-      - name: Print full error log on failure
-        if: failure()
-        run: |
-          echo "=== FULL BUILD LOG ==="
-          cat build.log
+          cd Builds/Android
+          ./gradlew assembleDebug --stacktrace
 
       - name: Find APK
-        if: success()
         id: find_apk
         run: |
           APK_PATH=$(find . -name "*.apk" | head -n 1)
@@ -714,7 +602,6 @@ jobs:
           echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
 
       - name: Upload Android APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
