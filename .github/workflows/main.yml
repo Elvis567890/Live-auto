@@ -547,7 +547,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Corrected Projucer CLI syntax)
+  # 5. ANDROID (Generates Keystore for Signing)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -595,18 +595,22 @@ jobs:
 
       - name: Configure Projucer Global Paths
         run: |
-          # Set the global search path for JUCE modules
           ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
 
       - name: Resolve Projucer dependencies
         run: |
-          # Resave the project, which will now find the modules via the global path
           ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.0.2
+
+      - name: Generate Debug Keystore
+        run: |
+          # Create the default Android debug keystore required for packaging
+          mkdir -p $HOME/.android
+          keytool -genkey -v -keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build APK
         env:
