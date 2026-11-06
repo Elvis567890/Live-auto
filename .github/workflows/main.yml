@@ -279,6 +279,8 @@ jobs:
 
           private:
               void timerCallback() override;
+              void startAudio();
+              void stopAudio();
 
               juce::AudioDeviceManager deviceManager;
               std::unique_ptr<PitchDetector> pitchDetector;
@@ -303,9 +305,17 @@ jobs:
               addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton);
 
-              noteLabel.setFont(juce::Font(28.0f));
-              chordLabel.setFont(juce::Font(28.0f));
+              // Responsive Font Sizes
+              noteLabel.setFont(juce::Font(36.0f, juce::Font::bold));
+              chordLabel.setFont(juce::Font(36.0f, juce::Font::bold));
               statusLabel.setFont(juce::Font(16.0f));
+              
+              // Center the text
+              noteLabel.setJustificationType(juce::Justification::centred);
+              chordLabel.setJustificationType(juce::Justification::centred);
+              statusLabel.setJustificationType(juce::Justification::centred);
+
+              // Colors
               noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);
               chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
               statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
@@ -316,19 +326,21 @@ jobs:
 
               startButton.onClick = [this] {
                   if (deviceManager.getCurrentAudioDevice() == nullptr) {
-                      auto err = deviceManager.initialiseWithDefaultDevices(1, 0);
-                      if (err.isNotEmpty()) {
-                          statusLabel.setText("Error: " + err, juce::dontSendNotification);
-                          return;
+                      // Check for Android microphone permission at runtime
+                      if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
+                          juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio,
+                              [this](bool granted) {
+                                  if (granted) {
+                                      startAudio();
+                                  } else {
+                                      statusLabel.setText("Microphone permission denied", juce::dontSendNotification);
+                                  }
+                              });
+                      } else {
+                          startAudio();
                       }
-                      deviceManager.addAudioCallback(this);
-                      statusLabel.setText("Audio: running", juce::dontSendNotification);
-                      startButton.setButtonText("Stop");
                   } else {
-                      deviceManager.removeAudioCallback(this);
-                      deviceManager.closeAudioDevice();
-                      statusLabel.setText("Audio: stopped", juce::dontSendNotification);
-                      startButton.setButtonText("Start");
+                      stopAudio();
                   }
               };
 
@@ -338,21 +350,45 @@ jobs:
 
           MainComponent::~MainComponent() {
               stopTimer();
+              stopAudio();
+          }
+
+          void MainComponent::startAudio() {
+              auto err = deviceManager.initialiseWithDefaultDevices(1, 0);
+              if (err.isNotEmpty()) {
+                  statusLabel.setText("Error: " + err, juce::dontSendNotification);
+                  return;
+              }
+              deviceManager.addAudioCallback(this);
+              statusLabel.setText("Audio: running", juce::dontSendNotification);
+              startButton.setButtonText("Stop");
+          }
+
+          void MainComponent::stopAudio() {
               deviceManager.removeAudioCallback(this);
               deviceManager.closeAudioDevice();
+              statusLabel.setText("Audio: stopped", juce::dontSendNotification);
+              startButton.setButtonText("Start");
           }
 
           void MainComponent::paint(juce::Graphics& g) {
               g.fillAll(juce::Colour::fromRGB(20, 20, 30));
           }
 
+          // RESPONSIVE LAYOUT
           void MainComponent::resized() {
-              auto area = getLocalBounds().reduced(24);
-              noteLabel.setBounds(area.removeFromTop(60));
-              chordLabel.setBounds(area.removeFromTop(60));
-              statusLabel.setBounds(area.removeFromTop(30));
-              area.removeFromTop(20);
-              startButton.setBounds(area.removeFromTop(48).removeFromLeft(160));
+              auto area = getLocalBounds().reduced(20);
+              
+              // Divide the screen height into 4 equal blocks
+              int blockHeight = area.getHeight() / 4;
+
+              noteLabel.setBounds(area.removeFromTop(blockHeight));
+              chordLabel.setBounds(area.removeFromTop(blockHeight));
+              statusLabel.setBounds(area.removeFromTop(blockHeight));
+              
+              // Center the Start button at the bottom
+              auto buttonArea = area.removeFromTop(blockHeight);
+              startButton.setBounds(buttonArea.withSizeKeepingCentre(200, 60));
           }
 
           void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device) {
@@ -387,7 +423,7 @@ jobs:
               float f = currentFreq.load();
               if (f > 0.0f) {
                   noteLabel.setText("Note: " + PitchDetector::freqToNote(f) +
-                                    "  (" + juce::String(f, 1) + " Hz)",
+                                    "\n(" + juce::String(f, 1) + " Hz)",
                                     juce::dontSendNotification);
               }
               chordLabel.setText("Chord: " + chordInference.getChord(),
@@ -547,7 +583,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Generates Keystore for Signing)
+  # 5. ANDROID (Responsive UI + Runtime Permission)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -608,7 +644,6 @@ jobs:
 
       - name: Generate Debug Keystore
         run: |
-          # Create the default Android debug keystore required for packaging
           mkdir -p $HOME/.android
           keytool -genkey -v -keystore $HOME/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
