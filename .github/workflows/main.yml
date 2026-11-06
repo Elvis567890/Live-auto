@@ -595,7 +595,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed Gradle version format)
+  # 5. ANDROID (Fixed X11 dependency)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -605,10 +605,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: source }
 
-      - uses: actions/setup-java@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxrandr-dev libxrender-dev libfreetype6-dev libglu1-mesa-dev
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
