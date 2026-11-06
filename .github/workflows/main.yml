@@ -598,7 +598,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Full dependencies for juceaide)
+  # 5. ANDROID (Fixed juceaide target generation)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -651,17 +651,20 @@ jobs:
 
       - name: Build host juceaide
         run: |
-          cmake -B build_host -G Ninja -DCMAKE_BUILD_TYPE=Release -DJUCE_BUILD_EXTRAS=ON
+          cmake -B build_host -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DJUCE_BUILD_HELPER_TOOLS=ON
           cmake --build build_host --target juceaide
 
       - name: Build APK with Gradle (Debug)
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
         run: |
-          # Copy the host juceaide into the paths where CMake expects it for Android
+          # Locate the freshly built host juceaide binary
           JUCEAIDE_PATH=$(find build_host -name "juceaide" -type f | head -n 1)
           echo "Found juceaide at: $JUCEAIDE_PATH"
           
+          # Copy it into the exact paths where CMake expects it for each Android ABI
           for ABI in arm64-v8a armeabi-v7a x86_64; do
             mkdir -p build/AILiveBand_artefacts/Debug/$ABI/extras/Build/juceaide
             cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/$ABI/extras/Build/juceaide/juceaide
