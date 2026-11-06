@@ -68,7 +68,6 @@ jobs:
           )
           EOF
 
-          # Complete Projucer project file with modules and useAppConfig
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -548,7 +547,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Projucer-based build)
+  # 5. ANDROID (Corrected Projucer CLI syntax)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -594,9 +593,15 @@ jobs:
           cd ../../../../..
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
 
+      - name: Configure Projucer Global Paths
+        run: |
+          # Set the global search path for JUCE modules
+          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+
       - name: Resolve Projucer dependencies
         run: |
-          ${{ env.PROJUCER_PATH }} --resave --juce_path=$(pwd)/JUCE AILiveBand.jucer
+          # Resave the project, which will now find the modules via the global path
+          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
