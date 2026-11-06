@@ -127,6 +127,10 @@ jobs:
                           arguments "-DANDROID_STL=c++_shared"
                       }
                   }
+                  ndk {
+                      // Build for all modern architectures (64-bit and 32-bit)
+                      abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+                  }
               }
 
               buildTypes {
@@ -595,7 +599,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixed X11 dependency)
+  # 5. ANDROID (Multi-ABI support)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -614,7 +618,7 @@ jobs:
       - name: Install Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxrandr-dev libxrender-dev libfreetype6-dev libglu1-mesa-dev
+          sudo apt-get install -y libx11-dev libxext-dev libxinerama-dev libxcursor-dev libxrandr-dev libxrender-dev libfreetype6-dev libglu1-mesa-dev libasound2-dev libcurl4-openssl-dev
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
