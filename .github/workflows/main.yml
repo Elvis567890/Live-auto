@@ -50,12 +50,17 @@ jobs:
             Source/ChordInference.cpp
           )
 
+          # Explicitly enable all required JUCE modules
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
             JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
+            JUCE_MODULE_AVAILABLE_juce_audio_utils=1
+            JUCE_MODULE_AVAILABLE_juce_audio_devices=1
+            JUCE_MODULE_AVAILABLE_juce_dsp=1
+            JUCE_MODULE_AVAILABLE_juce_gui_extra=1
           )
 
           if(ANDROID)
@@ -120,7 +125,7 @@ jobs:
           android {
               namespace 'com.ailiveband.app'
               compileSdk 34
-              ndkVersion "21.4.7075529"
+              ndkVersion "26.3.11579264"
 
               defaultConfig {
                   applicationId "com.ailiveband.app"
@@ -605,7 +610,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Downgraded NDK to 21.4)
+  # 5. ANDROID (Upgraded to NDK 26)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -637,10 +642,10 @@ jobs:
         with:
           packages: ''
 
-      - name: Accept Android Licenses & Install NDK 21.4
+      - name: Accept Android Licenses & Install NDK 26.3
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
-          sdkmanager "ndk;21.4.7075529" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
+          sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
 
       - name: Setup Gradle (Pin to version 8.0.2)
         uses: gradle/actions/setup-gradle@v3
@@ -670,9 +675,10 @@ jobs:
             -DJUCE_BUILD_HELPER_TOOLS=ON
           cmake --build build_host --target juceaide --parallel
 
-      - name: Build APK with Gradle (Debug)
+      - name: Build APK with Gradle (Debug) and capture log
+        id: build_apk
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/21.4.7075529
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
         run: |
           # Locate the freshly built host juceaide binary
           JUCEAIDE_PATH=$(find build_host -name "juceaide" -type f | head -n 1)
@@ -684,9 +690,19 @@ jobs:
             cp "$JUCEAIDE_PATH" build/AILiveBand_artefacts/Debug/$ABI/extras/Build/juceaide/juceaide
           done
 
-          ./gradlew assembleDebug --stacktrace
+          # Run build and tee output to log file, preserving exit code
+          set +e
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Print full error log on failure
+        if: failure()
+        run: |
+          echo "=== FULL BUILD LOG ==="
+          cat build.log
 
       - name: Find APK
+        if: success()
         id: find_apk
         run: |
           APK_PATH=$(find . -name "*.apk" | head -n 1)
@@ -698,6 +714,7 @@ jobs:
           echo "APK_PATH=$APK_PATH" >> $GITHUB_ENV
 
       - name: Upload Android APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
