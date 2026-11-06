@@ -83,18 +83,17 @@ jobs:
               </GROUP>
             </MAINGROUP>
             <EXPORTFORMATS>
-              <ANDROID id="android-exporter" targetFolder="Builds/Android">
+              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" enablePluginBinaryCopyStep="0"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" enablePluginBinaryCopyStep="0" optimise="1"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
                 </CONFIGURATIONS>
                 <MODULEPATHS/>
-              </ANDROID>
+              </ANDROIDSTUDIO>
             </EXPORTFORMATS>
           </JUCERPROJECT>
           EOF
 
-          # C++ Source files (omitted for brevity, same as previous)
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
