@@ -58,6 +58,14 @@ jobs:
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
           )
 
+          # Explicitly define Android targets to prevent desktop header pollution
+          if(ANDROID)
+            target_compile_definitions(AILiveBand PRIVATE 
+              JUCE_ANDROID=1 
+              JUCE_ANDROID_API_VERSION=24
+            )
+          endif()
+
           target_link_libraries(AILiveBand PRIVATE
             juce::juce_audio_utils
             juce::juce_audio_devices
@@ -124,8 +132,8 @@ jobs:
 
                   externalNativeBuild {
                       cmake {
-                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24"
-                          cppFlags "-std=c++17"
+                          arguments "-DANDROID_STL=c++_shared", "-DANDROID_PLATFORM=android-24", "-DANDROID_CPP_FEATURES=rtti exceptions"
+                          cppFlags "-std=c++17 -frtti -fexceptions"
                       }
                   }
                   ndk {
@@ -598,7 +606,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Isolated host build for juceaide)
+  # 5. ANDROID (Fixed graphics target definitions)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
