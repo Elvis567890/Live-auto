@@ -68,9 +68,10 @@ jobs:
           )
           EOF
 
+          # Complete Projucer project file with modules and useAppConfig
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
-          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17">
+          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
             <MAINGROUP id="main-group" name="AILiveBand">
               <GROUP id="source-group" name="Source">
                 <FILE id="main-cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
@@ -82,6 +83,20 @@ jobs:
                 <FILE id="chord-inference-cpp" name="ChordInference.cpp" compile="1" resource="0" file="Source/ChordInference.cpp"/>
               </GROUP>
             </MAINGROUP>
+            <MODULES>
+              <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_audio_formats" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_audio_processors" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_core" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_data_structures" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
+            </MODULES>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android">
                 <CONFIGURATIONS>
@@ -533,7 +548,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Projucer-based build with full dependencies)
+  # 5. ANDROID (Projucer-based build)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -581,7 +596,7 @@ jobs:
 
       - name: Resolve Projucer dependencies
         run: |
-          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+          ${{ env.PROJUCER_PATH }} --resave --juce_path=$(pwd)/JUCE AILiveBand.jucer
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
