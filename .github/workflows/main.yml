@@ -649,7 +649,7 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # THE CRITICAL ANDROID FIX: Completely overwrite AndroidManifest.xml with the exact required structure
+      # THE CRITICAL ANDROID FIX: Completely overwrite AndroidManifest.xml with a valid system theme
       - name: Overwrite AndroidManifest.xml
         run: |
           cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -659,7 +659,7 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <uses-feature android:glEsVersion="0x00020000" android:required="true" />
-              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true" android:hardwareAccelerated="true" android:theme="@style/Theme.AppCompat.NoActionBar">
+              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar">
                   <activity android:name="com.rmsl.juce.JuceAppActivity"
                             android:exported="true"
                             android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
