@@ -257,7 +257,6 @@ jobs:
               void noteOn(int channel, int midiNote, float velocity);
               void noteOff(int channel, int midiNote);
               void render(float* leftChannel, float* rightChannel, int numSamples);
-              void setInstrument(int channel, int programNumber);
           private:
               tsf* synth = nullptr;
           };
@@ -277,10 +276,10 @@ jobs:
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      // Set defaults: Piano, Bass, Strings, Drums
-                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Ch 0: Acoustic Grand Piano
-                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Ch 1: Acoustic Bass
-                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Ch 2: String Ensemble
+                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Ch 0: Piano
+                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Ch 1: Bass
+                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Ch 2: Strings
+                      tsf_channel_set_presetnumber(synth, 3, 27, 0); // Ch 3: Electric Guitar (for solo)
                       tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Ch 9: Drums
                   }
               } catch (...) { synth = nullptr; }
@@ -307,13 +306,9 @@ jobs:
                   if (rightChannel) juce::FloatVectorOperations::clear(rightChannel, numSamples);
               }
           }
-
-          void SoundFontSynth::setInstrument(int channel, int programNumber) {
-              if (synth) tsf_channel_set_presetnumber(synth, channel, programNumber, 0);
-          }
           EOF
 
-          # The "Thinking" Arranger
+          # The Generative AI Arranger
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -325,84 +320,119 @@ jobs:
               Arranger(ChordInference& ci, SoundFontSynth& s);
               void start();
               void stop();
-              void updateEnergy(float energy); // Called from audio thread
+              void processVoice(float energy, int midiNote);
+              bool isJamming() const { return currentState == State::Jamming; }
           private:
+              enum class State { Listening, Jamming, EndingJam };
               void timerCallback() override;
+              void playGenerativeSolo(int root, int currentBeat);
+              
               ChordInference& chordEngine;
               SoundFontSynth& synth;
+              
               int beatCounter = 0;
               std::atomic<float> currentEnergy { 0.0f };
+              std::atomic<int> lastMidiNote { 60 };
+              
+              double lastVoiceTime = 0.0;
+              State currentState = State::Listening;
+              int jamTicks = 0;
           };
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           
-          void Arranger::start() { beatCounter = 0; startTimer(500); }
+          void Arranger::start() { 
+              beatCounter = 0; 
+              lastVoiceTime = juce::Time::getMillisecondCounterHiRes();
+              currentState = State::Listening;
+              startTimer(100); 
+          }
           void Arranger::stop() { stopTimer(); }
-          
-          void Arranger::updateEnergy(float energy) { currentEnergy.store(energy); }
+
+          void Arranger::processVoice(float energy, int midiNote) {
+              currentEnergy.store(energy);
+              if (midiNote > 0) lastMidiNote.store(midiNote);
+              lastVoiceTime = juce::Time::getMillisecondCounterHiRes();
+              
+              if (currentState == State::Jamming || currentState == State::EndingJam) {
+                  currentState = State::Listening; // Singer is back!
+              }
+          }
 
           void Arranger::timerCallback() {
+              auto now = juce::Time::getMillisecondCounterHiRes();
+              double timeSinceVoice = (now - lastVoiceTime) / 1000.0;
+              float energy = currentEnergy.load();
               int root = chordEngine.getRootNote();
               auto notes = chordEngine.getChordNotes();
-              float energy = currentEnergy.load();
 
-              // A real band doesn't play everything all the time. 
-              // We use a 16-beat loop and the singer's energy to decide what to play.
+              // 1. STATE MACHINE (The AI Brain)
+              if (timeSinceVoice > 2.0 && currentState == State::Listening) {
+                  currentState = State::Jamming; // Singer stopped! Take over.
+                  jamTicks = 0;
+              } else if (currentState == State::Jamming && jamTicks > 300) {
+                  currentState = State::EndingJam; // Jam for 30 seconds, then wrap it up
+              }
 
-              bool shouldPlayPiano = false;
-              bool shouldPlayBass = false;
-              bool shouldPlayStrings = false;
-              bool shouldPlayDrums = false;
-
-              // 1. The "Brain" logic based on energy
-              if (energy > 0.1f) {
-                  // High energy: Full band!
-                  shouldPlayDrums = true;
-                  shouldPlayBass = true;
-                  shouldPlayPiano = (beatCounter % 4 == 0); // Stab on beat 1
+              // 2. EXECUTE STATE
+              if (currentState == State::Listening) {
+                  // Backing band mode
+                  if (energy > 0.05f) {
+                      if (beatCounter % 8 == 0) synth.noteOn(1, root, 0.7f); // Bass
+                      if (beatCounter % 4 == 0) synth.noteOn(9, 36, 0.8f);  // Kick
+                      if (beatCounter % 4 == 2) synth.noteOn(9, 38, 0.8f);  // Snare
+                      if (beatCounter % 8 == 4 && !notes.empty()) {
+                          for (int n : notes) synth.noteOn(0, n, 0.5f); // Soft Piano
+                      }
+                  }
               } 
-              else if (energy > 0.02f) {
-                  // Medium energy: Groove (Bass + Drums)
-                  shouldPlayDrums = true;
-                  shouldPlayBass = true;
-                  shouldPlayPiano = (beatCounter % 8 == 0); // Piano every 2 bars
-              } 
-              else {
-                  // Low energy / quiet singing: Ambient (Strings + Bass)
-                  shouldPlayStrings = (beatCounter % 4 == 0);
-                  shouldPlayBass = (beatCounter % 4 == 0 || beatCounter % 4 == 2);
-                  shouldPlayDrums = false;
-                  shouldPlayPiano = false;
+              else if (currentState == State::Jamming) {
+                  // THE AI SOLO TAKEOVER
+                  // Keep the dance beat going heavy
+                  if (beatCounter % 2 == 0) synth.noteOn(9, 36, 0.9f); // Kick
+                  if (beatCounter % 4 == 2) synth.noteOn(9, 38, 0.9f); // Snare
+                  if (beatCounter % 4 == 0) synth.noteOn(1, root, 0.8f); // Bass root
+                  
+                  // Generative Guitar Solo (Plays every half-beat)
+                  if (beatCounter % 2 == 1) {
+                      playGenerativeSolo(root, beatCounter);
+                  }
+                  jamTicks++;
               }
-
-              // 2. Dynamic Drops (Like a real band, dropping out for a bar)
-              if (beatCounter >= 12 && beatCounter < 16) {
-                  // The "Breakdown" every 4th bar. 
-                  shouldPlayDrums = false;
-                  shouldPlayPiano = false;
-                  shouldPlayStrings = true;
-              }
-
-              // 3. Trigger the instruments
-              if (shouldPlayBass) synth.noteOn(1, root, 0.8f);
-              
-              if (shouldPlayPiano && !notes.empty()) {
-                  for (int note : notes) synth.noteOn(0, note, 0.6f);
-              }
-
-              if (shouldPlayStrings && !notes.empty()) {
-                  for (int note : notes) synth.noteOn(2, note + 12, 0.5f); // Strings play an octave higher
-              }
-
-              if (shouldPlayDrums) {
-                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38; // Kick/Snare
-                  synth.noteOn(9, drumNote, 1.0f);
+              else if (currentState == State::EndingJam) {
+                  // Ending the jam with a big crash and chord
+                  if (jamTicks % 8 == 0) {
+                      for (int n : notes) synth.noteOn(2, n + 12, 0.8f); // Strings climax
+                  }
+                  if (jamTicks > 320) {
+                      currentState = State::Listening; // Go back to waiting
+                  }
+                  jamTicks++;
               }
 
               beatCounter++;
-              if (beatCounter >= 16) beatCounter = 0; // 16-beat loop
+              if (beatCounter >= 16) beatCounter = 0;
+          }
+
+          void Arranger::playGenerativeSolo(int root, int currentBeat) {
+              // This is an Algorithmic Markov Chain for melody generation.
+              // It chooses notes based on probability, ensuring it stays in the current scale.
+              int scale[] = {0, 3, 5, 7, 10, 12, 15}; // Minor Pentatonic (Guaranteed to sound good)
+              
+              // 30% chance to play the exact note the singer last sang
+              if (rand() % 100 < 30) {
+                  synth.noteOn(3, lastMidiNote.load() + 12, 0.8f); // Electric Guitar
+              } else {
+                  // Otherwise, jump around the scale musically
+                  int index = rand() % 7;
+                  // Bias towards lower notes so it doesn't get too screechy
+                  if (rand() % 100 < 70) index = rand() % 4; 
+                  
+                  int noteToPlay = root + scale[index] + 12;
+                  synth.noteOn(3, noteToPlay, 0.8f); // Electric Guitar
+              }
           }
           EOF
 
@@ -525,17 +555,20 @@ jobs:
 
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
-                  // Calculate energy (volume) of the input
                   float rms = 0.0f;
                   for (int i = 0; i < numSamples; ++i) rms += inputChannelData[0][i] * inputChannelData[0][i];
                   rms = std::sqrt(rms / numSamples);
                   
-                  if (arranger) arranger->updateEnergy(rms);
-
+                  int midiNote = 0;
                   float freq = pitchDetector->detect(inputChannelData[0], numSamples);
                   if (freq > 0.0f) {
+                      midiNote = PitchDetector::freqToMidi(freq);
                       currentFreq.store(freq);
-                      chordInference.addNote(PitchDetector::freqToMidi(freq));
+                      chordInference.addNote(midiNote);
+                  }
+
+                  if (arranger) {
+                      arranger->processVoice(rms, midiNote);
                   }
               }
               if (numOutputChannels >= 2) {
@@ -547,6 +580,14 @@ jobs:
               float f = currentFreq.load();
               if (f > 0.0f) noteLabel.setText("Note: " + PitchDetector::freqToNote(f) + "\n(" + juce::String(f, 1) + " Hz)", juce::dontSendNotification);
               chordLabel.setText("Chord: " + chordInference.getChord(), juce::dontSendNotification);
+              
+              if (arranger && arranger->isJamming()) {
+                  statusLabel.setText("AI is JAMMING!", juce::dontSendNotification);
+                  statusLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+              } else {
+                  statusLabel.setText("Audio: running", juce::dontSendNotification);
+                  statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+              }
           }
           EOF
 
@@ -652,7 +693,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Forced Permissions, Low SDK, Universal ABIs)
+  # 5. ANDROID
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -687,7 +728,6 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # THE PERMISSION FIX: Force inject permissions into the Manifest
       - name: Inject Permissions via Python
         run: |
           python3 -c "
