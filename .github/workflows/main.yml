@@ -15,8 +15,10 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
+          # 下载 TinySoundFont 头文件
           wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          wget -q https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2 -O SoundFont.sf2
+          # 使用稳定的 GitHub 链接下载 GeneralUser GS SoundFont
+          wget -q https://raw.githubusercontent.com/Abdess/retrobios/main/bios/Other/GeneralUser%20GS/GeneralUser-GS.sf2 -O SoundFont.sf2
 
       - name: Create project files
         run: |
@@ -81,7 +83,6 @@ jobs:
           )
           EOF
 
-          # FIXED: Correct Projucer syntax for Android permissions
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -117,8 +118,7 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
             <EXPORTFORMATS>
-              <!-- PERMISSIONS INJECTED CORRECTLY HERE -->
-              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" androidPermissions="android.permission.RECORD_AUDIO;android.permission.MODIFY_AUDIO_SETTINGS">
+              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android">
                 <CONFIGURATIONS>
                   <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand"/>
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
@@ -397,7 +397,6 @@ jobs:
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
 
-              // FIXED: Removed Bold to prevent Android font crash
               noteLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               chordLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
@@ -636,6 +635,11 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
+      - name: Inject Microphone Permission into Manifest
+        run: |
+          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
+          sed -i 's/<application/<uses-permission android:name="android.permission.RECORD_AUDIO" \/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" \/>\n    <application/' "$MANIFEST"
+
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
 
