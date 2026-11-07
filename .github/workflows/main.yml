@@ -15,9 +15,7 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          # Fixed: Direct raw URL to the current master branch
           wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          # Fixed: Direct raw URL to the GeneralUser GS SoundFont file
           wget -q https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2 -O SoundFont.sf2
 
       - name: Create project files
@@ -78,7 +76,6 @@ jobs:
           )
           EOF
 
-          # Jucer file with the SoundFont embedded as a binary resource
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -245,7 +242,7 @@ jobs:
           }
           EOF
 
-          # ── SOUNDFONT SYNTH ──
+          # ── SOUNDFONT SYNTH (FIXED AUDIO ROUTING) ──
           cat > Source/SoundFontSynth.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -257,7 +254,7 @@ jobs:
               void initialize(double sampleRate);
               void noteOn(int channel, int midiNote, float velocity);
               void noteOff(int channel, int midiNote);
-              void render(float* interleavedOutput, int numSamples);
+              void render(float* leftChannel, float* rightChannel, int numSamples);
               void setInstrument(int channel, int programNumber);
           private:
               tsf* synth = nullptr;
@@ -290,13 +287,21 @@ jobs:
               if (synth) tsf_channel_note_off(synth, channel, midiNote);
           }
 
-          void SoundFontSynth::render(float* interleavedOutput, int numSamples) {
+          void SoundFontSynth::render(float* leftChannel, float* rightChannel, int numSamples) {
               if (synth) {
-                  juce::HeapBlock<short> shortBuffer(numSamples * 2);
-                  tsf_render_short(synth, shortBuffer.getData(), numSamples, 0);
-                  for (int i = 0; i < numSamples * 2; ++i) {
-                      interleavedOutput[i] = shortBuffer[i] / 32768.0f;
+                  // TinySoundFont renders interleaved, but JUCE expects separate L/R buffers
+                  juce::HeapBlock<float> interleavedBuffer(numSamples * 2);
+                  tsf_render_float(synth, interleavedBuffer.getData(), numSamples, 0);
+                  
+                  for (int i = 0; i < numSamples; ++i) {
+                      leftChannel[i] = interleavedBuffer[i * 2];
+                      if (rightChannel) {
+                          rightChannel[i] = interleavedBuffer[i * 2 + 1];
+                      }
                   }
+              } else {
+                  juce::FloatVectorOperations::clear(leftChannel, numSamples);
+                  if (rightChannel) juce::FloatVectorOperations::clear(rightChannel, numSamples);
               }
           }
 
@@ -428,6 +433,7 @@ jobs:
 
               startButton.onClick = [this] {
                   if (deviceManager.getCurrentAudioDevice() == nullptr) {
+                      // MICROPHONE PERMISSION FIX
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
                           juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) { if (granted) startAudio(); });
                       } else { startAudio(); }
@@ -478,6 +484,7 @@ jobs:
           void MainComponent::audioDeviceStopped() { pitchDetector.reset(); }
 
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
+              // 1. Process Microphone Input
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
                   float freq = pitchDetector->detect(inputChannelData[0], numSamples);
                   if (freq > 0.0f) {
@@ -485,8 +492,10 @@ jobs:
                       chordInference.addNote(PitchDetector::freqToMidi(freq));
                   }
               }
+              
+              // 2. Render Audio Output (Safely handling separate Left/Right channels)
               if (numOutputChannels >= 2) {
-                  synth.render(outputChannelData[0], numSamples);
+                  synth.render(outputChannelData[0], outputChannelData[1], numSamples);
               }
           }
 
@@ -588,7 +597,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID
+  # 5. ANDROID (Mic, Permissions, and SDK Path Fixed)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -621,6 +630,9 @@ jobs:
         run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+      - name: Fix Android SDK Location (local.properties)
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
       - name: Inject Microphone Permission into Manifest
         run: |
           MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
