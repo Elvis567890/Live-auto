@@ -15,8 +15,9 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          wget -q https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2 -O SoundFont.sf2
+          # FIXED: Using curl -L to follow redirects and bypass wget blocks
+          curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
+          curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
 
       - name: Create project files
         run: |
@@ -528,7 +529,7 @@ jobs:
               class MainWindow : public juce::DocumentWindow {
               public:
                   explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons) {
-                      // THIS FIXES THE ANDROID CRASH
+                      // THIS FIXES THE ANDROID CRASH: Disable Title Bar & Resizing on Android
                       #if !JUCE_ANDROID
                       setUsingNativeTitleBar(true);
                       setResizable(true, true);
@@ -634,7 +635,7 @@ jobs:
           sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
       - name: Download Projucer
         run: |
-          wget -q https://github.com/juce-framework/JUCE/releases/download/8.0.6/juce-8.0.6-linux.zip -O juce.zip
+          curl -sL -o juce.zip https://github.com/juce-framework/JUCE/releases/download/8.0.6/juce-8.0.6-linux.zip
           unzip -q juce.zip
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
           make -j$(nproc) CONFIG=Release
