@@ -15,10 +15,10 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          # Download the TinySoundFont C++ library
+          # Fixed: Direct raw URL to the current master branch
           wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          # Download a 128-instrument General MIDI SoundFont
-          wget -q https://github.com/urish/cinto/raw/master/media/GeneralUserGS.sf2 -O SoundFont.sf2
+          # Fixed: Direct raw URL to the GeneralUser GS SoundFont file
+          wget -q https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2 -O SoundFont.sf2
 
       - name: Create project files
         run: |
@@ -273,14 +273,12 @@ jobs:
 
           void SoundFontSynth::initialize(double sampleRate) {
               if (synth) tsf_close(synth);
-              // Load the SoundFont from the embedded binary data
               synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
               if (synth) {
                   tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                  // Set default instruments: Channel 0=Piano(0), 1=Bass(32), 9=Drums(Standard)
                   tsf_channel_set_presetnumber(synth, 0, 0, 0); 
                   tsf_channel_set_presetnumber(synth, 1, 32, 0); 
-                  tsf_channel_set_presetnumber(synth, 9, 0, 1); // Channel 9 is standard MIDI drum channel
+                  tsf_channel_set_presetnumber(synth, 9, 0, 1);
               }
           }
 
@@ -294,10 +292,8 @@ jobs:
 
           void SoundFontSynth::render(float* interleavedOutput, int numSamples) {
               if (synth) {
-                  // TinySoundFont renders as 16-bit shorts, so we use a temporary buffer
                   juce::HeapBlock<short> shortBuffer(numSamples * 2);
                   tsf_render_short(synth, shortBuffer.getData(), numSamples, 0);
-                  // Convert 16-bit short to 32-bit float
                   for (int i = 0; i < numSamples * 2; ++i) {
                       interleavedOutput[i] = shortBuffer[i] / 32768.0f;
                   }
@@ -339,15 +335,13 @@ jobs:
           void Arranger::timerCallback() {
               int root = chordEngine.getRootNote();
               auto notes = chordEngine.getChordNotes();
-              if (playBass && (beatCounter % 4 == 0 || beatCounter % 4 == 2)) {
-                  synth.noteOn(1, root, 0.8f); // Channel 1 = Bass
-              }
+              if (playBass && (beatCounter % 4 == 0 || beatCounter % 4 == 2)) synth.noteOn(1, root, 0.8f);
               if (playPiano && (beatCounter % 4 == 0) && !notes.empty()) {
-                  for (int note : notes) synth.noteOn(0, note, 0.6f); // Channel 0 = Piano
+                  for (int note : notes) synth.noteOn(0, note, 0.6f);
               }
               if (playDrums) {
-                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38; // 36=Kick, 38=Snare
-                  synth.noteOn(9, drumNote, 1.0f); // Channel 9 = Drums
+                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38;
+                  synth.noteOn(9, drumNote, 1.0f);
               }
               beatCounter++;
               if (beatCounter > 3) beatCounter = 0;
@@ -411,7 +405,6 @@ jobs:
               chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
               statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
 
-              // Setup the Instrument Selector
               instrumentSelector.addItem("Acoustic Grand Piano", 1);
               instrumentSelector.addItem("Electric Piano", 2);
               instrumentSelector.addItem("Acoustic Guitar", 3);
@@ -422,17 +415,15 @@ jobs:
               instrumentSelector.setSelectedId(1);
 
               instrumentSelector.onChange = [this] {
-                  // Map UI selections to General MIDI program numbers (0-127)
                   int selection = instrumentSelector.getSelectedId();
-                  int programNumber = 0; // Default Grand Piano
-                  if (selection == 2) programNumber = 4;  // Electric Piano
-                  else if (selection == 3) programNumber = 24; // Acoustic Guitar
-                  else if (selection == 4) programNumber = 27; // Electric Guitar
-                  else if (selection == 5) programNumber = 40; // Violin
-                  else if (selection == 6) programNumber = 48; // Strings
-                  else if (selection == 7) programNumber = 89; // Synth Pad
-                  
-                  synth.setInstrument(0, programNumber); // Channel 0 is the Piano/Chord channel
+                  int programNumber = 0;
+                  if (selection == 2) programNumber = 4;
+                  else if (selection == 3) programNumber = 24;
+                  else if (selection == 4) programNumber = 27;
+                  else if (selection == 5) programNumber = 40;
+                  else if (selection == 6) programNumber = 48;
+                  else if (selection == 7) programNumber = 89;
+                  synth.setInstrument(0, programNumber);
               };
 
               startButton.onClick = [this] {
@@ -495,9 +486,7 @@ jobs:
                   }
               }
               if (numOutputChannels >= 2) {
-                  synth.render(outputChannelData[0], numSamples); // This function renders and interleaves internally
-                  // TinySoundFont interleaves stereo directly to outputChannelData[0] if we pass it as an array, 
-                  // but the AudioIODeviceCallback gives us separate channels. We must de-interleave.
+                  synth.render(outputChannelData[0], numSamples);
               }
           }
 
