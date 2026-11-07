@@ -81,9 +81,11 @@ jobs:
           )
           EOF
 
+          # The critical fix: Injecting androidPermissions directly into the Projucer config
+          # and setting useAppConfig="1" for correct JNI bridging.
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
-          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="0" displaySplashScreen="0">
+          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
             <MAINGROUP id="main-group" name="AILiveBand">
               <GROUP id="source-group" name="Source">
                 <FILE id="main-cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
@@ -116,7 +118,8 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
             <EXPORTFORMATS>
-              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android">
+              <!-- Injecting Permissions directly here -->
+              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" androidPermissions="android.permission.RECORD_AUDIO;android.permission.MODIFY_AUDIO_SETTINGS">
                 <CONFIGURATIONS>
                   <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand"/>
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
@@ -617,7 +620,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Universal ABI & Activity Fix)
+  # 5. ANDROID (Relying on Projucer for Manifest & Gradle)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -648,41 +651,15 @@ jobs:
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
       - name: Configure Projucer Global Paths
         run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+      
+      # Let Projucer generate the perfect Manifest and Gradle files
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # 1. The Activity Name Fix (Stops the instant crash)
-      - name: Overwrite AndroidManifest.xml
-        run: |
-          cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-                    package="com.ailiveband.app">
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
-              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar">
-                  <activity android:name="com.rmsl.juce.JuceActivity"
-                            android:exported="true"
-                            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-      # 2. The Universal ABI Fix (Ensures 32-bit and 64-bit libraries are built)
-      - name: Inject Universal ABIs into build.gradle
-        run: |
-          # Inject abiFilters so Gradle builds for all phones
-          sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
-
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
 
+      # Only inject memory limits (safe and required for large files)
       - name: Inject Memory Limits into gradle.properties
         run: |
           cat > Builds/Android/gradle.properties << 'EOF'
