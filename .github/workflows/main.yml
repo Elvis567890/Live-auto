@@ -16,7 +16,6 @@ jobs:
       - name: Download SoundFont and TinySoundFont
         run: |
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          # 6MB SoundFont with ALL 128 Instruments, perfect for low-end phones
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
 
       - name: Create project files
@@ -82,7 +81,6 @@ jobs:
           )
           EOF
 
-          # Projucer project
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -118,7 +116,7 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
             <EXPORTFORMATS>
-              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" androidPermissions="android.permission.RECORD_AUDIO;android.permission.MODIFY_AUDIO_SETTINGS" minSdkVersion="21">
+              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
                 <CONFIGURATIONS>
                   <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand"/>
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
@@ -279,9 +277,11 @@ jobs:
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      tsf_channel_set_presetnumber(synth, 0, 0, 0); 
-                      tsf_channel_set_presetnumber(synth, 1, 32, 0); 
-                      tsf_channel_set_presetnumber(synth, 9, 0, 1);
+                      // Set defaults: Piano, Bass, Strings, Drums
+                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Ch 0: Acoustic Grand Piano
+                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Ch 1: Acoustic Bass
+                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Ch 2: String Ensemble
+                      tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Ch 9: Drums
                   }
               } catch (...) { synth = nullptr; }
           }
@@ -313,6 +313,7 @@ jobs:
           }
           EOF
 
+          # The "Thinking" Arranger
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -324,34 +325,84 @@ jobs:
               Arranger(ChordInference& ci, SoundFontSynth& s);
               void start();
               void stop();
-              bool playPiano = true;
-              bool playBass = true;
-              bool playDrums = true;
+              void updateEnergy(float energy); // Called from audio thread
           private:
               void timerCallback() override;
               ChordInference& chordEngine;
               SoundFontSynth& synth;
               int beatCounter = 0;
+              std::atomic<float> currentEnergy { 0.0f };
           };
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
+          
           void Arranger::start() { beatCounter = 0; startTimer(500); }
           void Arranger::stop() { stopTimer(); }
+          
+          void Arranger::updateEnergy(float energy) { currentEnergy.store(energy); }
+
           void Arranger::timerCallback() {
               int root = chordEngine.getRootNote();
               auto notes = chordEngine.getChordNotes();
-              if (playBass && (beatCounter % 4 == 0 || beatCounter % 4 == 2)) synth.noteOn(1, root, 0.8f);
-              if (playPiano && (beatCounter % 4 == 0) && !notes.empty()) {
+              float energy = currentEnergy.load();
+
+              // A real band doesn't play everything all the time. 
+              // We use a 16-beat loop and the singer's energy to decide what to play.
+
+              bool shouldPlayPiano = false;
+              bool shouldPlayBass = false;
+              bool shouldPlayStrings = false;
+              bool shouldPlayDrums = false;
+
+              // 1. The "Brain" logic based on energy
+              if (energy > 0.1f) {
+                  // High energy: Full band!
+                  shouldPlayDrums = true;
+                  shouldPlayBass = true;
+                  shouldPlayPiano = (beatCounter % 4 == 0); // Stab on beat 1
+              } 
+              else if (energy > 0.02f) {
+                  // Medium energy: Groove (Bass + Drums)
+                  shouldPlayDrums = true;
+                  shouldPlayBass = true;
+                  shouldPlayPiano = (beatCounter % 8 == 0); // Piano every 2 bars
+              } 
+              else {
+                  // Low energy / quiet singing: Ambient (Strings + Bass)
+                  shouldPlayStrings = (beatCounter % 4 == 0);
+                  shouldPlayBass = (beatCounter % 4 == 0 || beatCounter % 4 == 2);
+                  shouldPlayDrums = false;
+                  shouldPlayPiano = false;
+              }
+
+              // 2. Dynamic Drops (Like a real band, dropping out for a bar)
+              if (beatCounter >= 12 && beatCounter < 16) {
+                  // The "Breakdown" every 4th bar. 
+                  shouldPlayDrums = false;
+                  shouldPlayPiano = false;
+                  shouldPlayStrings = true;
+              }
+
+              // 3. Trigger the instruments
+              if (shouldPlayBass) synth.noteOn(1, root, 0.8f);
+              
+              if (shouldPlayPiano && !notes.empty()) {
                   for (int note : notes) synth.noteOn(0, note, 0.6f);
               }
-              if (playDrums) {
-                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38;
+
+              if (shouldPlayStrings && !notes.empty()) {
+                  for (int note : notes) synth.noteOn(2, note + 12, 0.5f); // Strings play an octave higher
+              }
+
+              if (shouldPlayDrums) {
+                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38; // Kick/Snare
                   synth.noteOn(9, drumNote, 1.0f);
               }
+
               beatCounter++;
-              if (beatCounter > 3) beatCounter = 0;
+              if (beatCounter >= 16) beatCounter = 0; // 16-beat loop
           }
           EOF
 
@@ -384,7 +435,6 @@ jobs:
               std::unique_ptr<Arranger> arranger;
 
               juce::Label noteLabel, chordLabel, statusLabel;
-              juce::ComboBox instrumentSelector;
               juce::TextButton startButton { "Start" };
 
               std::atomic<float> currentFreq { 0.0f };
@@ -397,7 +447,7 @@ jobs:
 
           MainComponent::MainComponent() {
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
-              addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
+              addAndMakeVisible(startButton);
 
               noteLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               chordLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
@@ -410,32 +460,13 @@ jobs:
               chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
               statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
 
-              instrumentSelector.addItem("Acoustic Grand Piano", 1);
-              instrumentSelector.addItem("Electric Piano", 2);
-              instrumentSelector.addItem("Acoustic Guitar", 3);
-              instrumentSelector.addItem("Electric Guitar (Clean)", 4);
-              instrumentSelector.addItem("Violin", 5);
-              instrumentSelector.addItem("String Ensemble", 6);
-              instrumentSelector.addItem("Synth Pad", 7);
-              
-              instrumentSelector.setSelectedId(1, juce::dontSendNotification);
-
-              instrumentSelector.onChange = [this] {
-                  int selection = instrumentSelector.getSelectedId();
-                  int programNumber = 0;
-                  if (selection == 2) programNumber = 4;
-                  else if (selection == 3) programNumber = 24;
-                  else if (selection == 4) programNumber = 27;
-                  else if (selection == 5) programNumber = 40;
-                  else if (selection == 6) programNumber = 48;
-                  else if (selection == 7) programNumber = 89;
-                  synth.setInstrument(0, programNumber);
-              };
-
               startButton.onClick = [this] {
                   if (deviceManager.getCurrentAudioDevice() == nullptr) {
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
-                          juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) { if (granted) startAudio(); });
+                          juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) {
+                              if (granted) startAudio();
+                              else statusLabel.setText("Microphone permission denied", juce::dontSendNotification);
+                          });
                       } else { startAudio(); }
                   } else { 
                       stopAudio(); 
@@ -477,12 +508,11 @@ jobs:
 
           void MainComponent::resized() {
               auto area = getLocalBounds().reduced(20);
-              int blockHeight = area.getHeight() / 5;
+              int blockHeight = area.getHeight() / 4;
 
               noteLabel.setBounds(area.removeFromTop(blockHeight));
               chordLabel.setBounds(area.removeFromTop(blockHeight));
               statusLabel.setBounds(area.removeFromTop(blockHeight));
-              instrumentSelector.setBounds(area.removeFromTop(blockHeight).withSizeKeepingCentre(300, 40));
               startButton.setBounds(area.removeFromTop(blockHeight).withSizeKeepingCentre(200, 60));
           }
 
@@ -495,6 +525,13 @@ jobs:
 
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
+                  // Calculate energy (volume) of the input
+                  float rms = 0.0f;
+                  for (int i = 0; i < numSamples; ++i) rms += inputChannelData[0][i] * inputChannelData[0][i];
+                  rms = std::sqrt(rms / numSamples);
+                  
+                  if (arranger) arranger->updateEnergy(rms);
+
                   float freq = pitchDetector->detect(inputChannelData[0], numSamples);
                   if (freq > 0.0f) {
                       currentFreq.store(freq);
@@ -615,7 +652,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Low SDK & Universal ABIs)
+  # 5. ANDROID (Forced Permissions, Low SDK, Universal ABIs)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -646,9 +683,26 @@ jobs:
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
       - name: Configure Projucer Global Paths
         run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+      
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
+      # THE PERMISSION FIX: Force inject permissions into the Manifest
+      - name: Inject Permissions via Python
+        run: |
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          path = 'Builds/Android/app/src/main/AndroidManifest.xml'
+          tree = ET.parse(path)
+          root = tree.getroot()
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS']:
+              elem = ET.Element('uses-permission')
+              elem.set('{http://schemas.android.com/apk/res/android}name', perm)
+              root.append(elem)
+          tree.write(path, xml_declaration=True, encoding='utf-8')
+          "
+
       - name: Force Universal ABIs in build.gradle
         run: |
           sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
