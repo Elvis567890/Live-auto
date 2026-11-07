@@ -40,10 +40,13 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
+          # MACOS MICROPHONE PERMISSION FIX
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
             COMPANY_NAME "AILiveBand"
             VERSION "0.1.0"
+            MICROPHONE_PERMISSION_ENABLED TRUE
+            MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access to listen to your singing."
           )
 
           juce_generate_juce_header(AILiveBand)
@@ -122,7 +125,6 @@ jobs:
           </JUCERPROJECT>
           EOF
 
-          # ── PITCH DETECTOR ──
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -171,7 +173,6 @@ jobs:
           }
           EOF
 
-          # ── CHORD INFERENCE ──
           cat > Source/ChordInference.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -242,7 +243,6 @@ jobs:
           }
           EOF
 
-          # ── SOUNDFONT SYNTH ──
           cat > Source/SoundFontSynth.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -306,7 +306,6 @@ jobs:
           }
           EOF
 
-          # ── ARRANGER ──
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -349,7 +348,6 @@ jobs:
           }
           EOF
 
-          # ── MAIN COMPONENT ──
           cat > Source/MainComponent.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -589,7 +587,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Fixes Memory Limits for Large SF2)
+  # 5. ANDROID
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -622,9 +620,33 @@ jobs:
         run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
-      - name: Fix Android SDK Location (local.properties)
+      
+      # ── ANDROID FIXES ──
+      - name: Fix Android SDK Location
         run: |
           echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
+          
+      - name: Overwrite AndroidManifest.xml with Explicit Microphone Permissions
+        run: |
+          cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                    package="com.ailiveband.app">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true">
+                  <activity android:name="com.rmsl.juce.JuceAppActivity"
+                            android:exported="true"
+                            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
       - name: Inject Memory Limits into gradle.properties
         run: |
           cat > Builds/Android/gradle.properties << 'EOF'
@@ -632,10 +654,8 @@ jobs:
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
-      - name: Inject Microphone Permission into Manifest
-        run: |
-          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+      # ── ANDROID FIXES END ──
+
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.0.2 }
       - name: Generate Debug Keystore
