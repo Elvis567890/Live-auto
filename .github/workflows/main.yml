@@ -242,7 +242,7 @@ jobs:
           }
           EOF
 
-          # ── SOUNDFONT SYNTH (FIXED AUDIO ROUTING) ──
+          # ── SOUNDFONT SYNTH ──
           cat > Source/SoundFontSynth.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -289,15 +289,11 @@ jobs:
 
           void SoundFontSynth::render(float* leftChannel, float* rightChannel, int numSamples) {
               if (synth) {
-                  // TinySoundFont renders interleaved, but JUCE expects separate L/R buffers
                   juce::HeapBlock<float> interleavedBuffer(numSamples * 2);
                   tsf_render_float(synth, interleavedBuffer.getData(), numSamples, 0);
-                  
                   for (int i = 0; i < numSamples; ++i) {
                       leftChannel[i] = interleavedBuffer[i * 2];
-                      if (rightChannel) {
-                          rightChannel[i] = interleavedBuffer[i * 2 + 1];
-                      }
+                      if (rightChannel) rightChannel[i] = interleavedBuffer[i * 2 + 1];
                   }
               } else {
                   juce::FloatVectorOperations::clear(leftChannel, numSamples);
@@ -433,7 +429,6 @@ jobs:
 
               startButton.onClick = [this] {
                   if (deviceManager.getCurrentAudioDevice() == nullptr) {
-                      // MICROPHONE PERMISSION FIX
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
                           juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) { if (granted) startAudio(); });
                       } else { startAudio(); }
@@ -484,7 +479,6 @@ jobs:
           void MainComponent::audioDeviceStopped() { pitchDetector.reset(); }
 
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
-              // 1. Process Microphone Input
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
                   float freq = pitchDetector->detect(inputChannelData[0], numSamples);
                   if (freq > 0.0f) {
@@ -492,8 +486,6 @@ jobs:
                       chordInference.addNote(PitchDetector::freqToMidi(freq));
                   }
               }
-              
-              // 2. Render Audio Output (Safely handling separate Left/Right channels)
               if (numOutputChannels >= 2) {
                   synth.render(outputChannelData[0], outputChannelData[1], numSamples);
               }
@@ -597,7 +589,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Mic, Permissions, and SDK Path Fixed)
+  # 5. ANDROID (Fixes Memory Limits for Large SF2)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -633,6 +625,13 @@ jobs:
       - name: Fix Android SDK Location (local.properties)
         run: |
           echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
+      - name: Inject Memory Limits into gradle.properties
+        run: |
+          cat > Builds/Android/gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
       - name: Inject Microphone Permission into Manifest
         run: |
           MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
@@ -647,7 +646,7 @@ jobs:
         env: { ANDROID_NDK_HOME: "${{ env.ANDROID_HOME }}/ndk/26.3.11579264" }
         run: |
           cd Builds/Android
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew clean assembleDebug --stacktrace
       - name: Find APK
         id: find_apk
         run: |
