@@ -16,7 +16,8 @@ jobs:
       - name: Download SoundFont and TinySoundFont
         run: |
           wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          wget -q https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/GeneralUser-GS.sf2 -O SoundFont.sf2
+          # FIXED: Using a 6MB SoundFont instead of 30MB to prevent Android OOM crash
+          wget -q https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2 -O SoundFont.sf2
 
       - name: Create project files
         run: |
@@ -40,8 +41,8 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
-          # 1. Embed the SoundFont for Desktop (Windows/Linux/Mac)
-          juce_add_binary_data(AILiveBandBinaryData SOURCES
+          # FIXED: Target named "BinaryData" so the header is generated as BinaryData.h
+          juce_add_binary_data(BinaryData SOURCES
             Source/SoundFont.sf2
           )
 
@@ -72,9 +73,8 @@ jobs:
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
           )
 
-          # 2. Link the BinaryData
           target_link_libraries(AILiveBand PRIVATE
-            AILiveBandBinaryData
+            BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
@@ -126,6 +126,10 @@ jobs:
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
                 </CONFIGURATIONS>
                 <MODULEPATHS/>
+                <PERMISSIONS>
+                  <PERMISSION name="android.permission.RECORD_AUDIO" />
+                  <PERMISSION name="android.permission.MODIFY_AUDIO_SETTINGS" />
+                </PERMISSIONS>
               </ANDROIDSTUDIO>
             </EXPORTFORMATS>
           </JUCERPROJECT>
@@ -276,7 +280,6 @@ jobs:
 
           void SoundFontSynth::initialize(double sampleRate) {
               if (synth) tsf_close(synth);
-              // Safety check for missing binary data
               if (BinaryData::SoundFont_sf2Size == 0) return; 
               synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
               if (synth) {
@@ -402,6 +405,7 @@ jobs:
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
 
+              // FIXED: JUCE 8 Font syntax
               noteLabel.setFont(juce::Font(juce::FontOptions(32.0f, juce::Font::bold)));
               chordLabel.setFont(juce::Font(juce::FontOptions(32.0f, juce::Font::bold)));
               statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
@@ -420,7 +424,8 @@ jobs:
               instrumentSelector.addItem("Violin", 5);
               instrumentSelector.addItem("String Ensemble", 6);
               instrumentSelector.addItem("Synth Pad", 7);
-              instrumentSelector.setSelectedId(1);
+              
+              instrumentSelector.setSelectedId(1, juce::dontSendNotification);
 
               instrumentSelector.onChange = [this] {
                   int selection = instrumentSelector.getSelectedId();
@@ -599,7 +604,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Surgical Manifest Fix)
+  # 5. ANDROID
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -633,12 +638,6 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # FIX: Surgical manifest injection instead of full overwrite
-      - name: Inject Microphone Permission into Manifest
-        run: |
-          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
-
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
 
