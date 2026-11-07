@@ -15,10 +15,8 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          # 下载 TinySoundFont 头文件
           wget -q https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
-          # 使用稳定的 GitHub 链接下载 GeneralUser GS SoundFont
-          wget -q https://raw.githubusercontent.com/Abdess/retrobios/main/bios/Other/GeneralUser%20GS/GeneralUser-GS.sf2 -O SoundFont.sf2
+          wget -q https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2 -O SoundFont.sf2
 
       - name: Create project files
         run: |
@@ -270,18 +268,20 @@ jobs:
           #include "tsf.h"
 
           SoundFontSynth::SoundFontSynth() {}
-          SoundFontSynth::~SoundFontSynth() { if (synth) tsf_close(synth); }
+          SoundFontSynth::~SoundFontSynth() { if (synth) { tsf_close(synth); synth = nullptr; } }
 
           void SoundFontSynth::initialize(double sampleRate) {
-              if (synth) tsf_close(synth);
+              if (synth) { tsf_close(synth); synth = nullptr; }
               if (BinaryData::SoundFont_sf2Size == 0) return; 
-              synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
-              if (synth && sampleRate > 0) {
-                  tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                  tsf_channel_set_presetnumber(synth, 0, 0, 0); 
-                  tsf_channel_set_presetnumber(synth, 1, 32, 0); 
-                  tsf_channel_set_presetnumber(synth, 9, 0, 1);
-              }
+              try {
+                  synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
+                  if (synth && sampleRate > 0) {
+                      tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
+                      tsf_channel_set_presetnumber(synth, 0, 0, 0); 
+                      tsf_channel_set_presetnumber(synth, 1, 32, 0); 
+                      tsf_channel_set_presetnumber(synth, 9, 0, 1);
+                  }
+              } catch (...) { synth = nullptr; }
           }
 
           void SoundFontSynth::noteOn(int channel, int midiNote, float velocity) {
@@ -435,7 +435,11 @@ jobs:
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
                           juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) { if (granted) startAudio(); });
                       } else { startAudio(); }
-                  } else { stopAudio(); }
+                  } else { 
+                      stopAudio(); 
+                      statusLabel.setText("Audio: stopped", juce::dontSendNotification);
+                      startButton.setButtonText("Start");
+                  }
               };
 
               setSize(700, 600);
@@ -445,8 +449,8 @@ jobs:
           MainComponent::~MainComponent() { stopTimer(); stopAudio(); }
 
           void MainComponent::startAudio() {
+              if (deviceManager.getCurrentAudioDevice() != nullptr) return;
               arranger = std::make_unique<Arranger>(chordInference, synth);
-
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
               if (err.isNotEmpty()) {
                   statusLabel.setText("Audio Error: " + err, juce::dontSendNotification);
@@ -456,7 +460,7 @@ jobs:
               deviceManager.addAudioCallback(this);
               statusLabel.setText("Audio: running", juce::dontSendNotification);
               startButton.setButtonText("Stop");
-              arranger->start();
+              if (arranger) arranger->start();
           }
 
           void MainComponent::stopAudio() {
@@ -464,10 +468,10 @@ jobs:
                   arranger->stop();
                   arranger.reset();
               }
-              deviceManager.removeAudioCallback(this);
-              deviceManager.closeAudioDevice();
-              statusLabel.setText("Audio: stopped", juce::dontSendNotification);
-              startButton.setButtonText("Start");
+              if (deviceManager.getCurrentAudioDevice() != nullptr) {
+                  deviceManager.removeAudioCallback(this);
+                  deviceManager.closeAudioDevice();
+              }
           }
 
           void MainComponent::paint(juce::Graphics& g) { g.fillAll(juce::Colour::fromRGB(20, 20, 30)); }
@@ -524,8 +528,14 @@ jobs:
               class MainWindow : public juce::DocumentWindow {
               public:
                   explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons) {
-                      setUsingNativeTitleBar(true); setContentOwned(new MainComponent(), true);
-                      setResizable(true, true); centreWithSize(getWidth(), getHeight()); setVisible(true);
+                      // THIS FIXES THE ANDROID CRASH
+                      #if !JUCE_ANDROID
+                      setUsingNativeTitleBar(true);
+                      setResizable(true, true);
+                      #endif
+                      setContentOwned(new MainComponent(), true);
+                      centreWithSize(getWidth(), getHeight());
+                      setVisible(true);
                   }
                   void closeButtonPressed() override { JUCEApplication::getInstance()->systemRequestedQuit(); }
               };
@@ -601,7 +611,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID
+  # 5. ANDROID (Safe Python Manifest Injection & Crash Fixes)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -635,10 +645,25 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      - name: Inject Microphone Permission into Manifest
+      # THE CRITICAL ANDROID FIX: Python XML Injection for exports and permissions
+      - name: Safely Inject Permissions into Manifest
         run: |
-          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
-          sed -i 's/<application/<uses-permission android:name="android.permission.RECORD_AUDIO" \/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" \/>\n    <application/' "$MANIFEST"
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          path = 'Builds/Android/app/src/main/AndroidManifest.xml'
+          tree = ET.parse(path)
+          root = tree.getroot()
+          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS']:
+              elem = ET.Element('uses-permission')
+              elem.set('{http://schemas.android.com/apk/res/android}name', perm)
+              root.append(elem)
+          app = root.find('application')
+          if app is not None:
+              for act in app.findall('activity'):
+                  act.set('{http://schemas.android.com/apk/res/android}exported', 'true')
+          tree.write(path, xml_declaration=True, encoding='utf-8')
+          "
 
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
