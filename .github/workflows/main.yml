@@ -583,7 +583,7 @@ jobs:
           path: build/AILiveBand_artefacts/Release/AI Live Band.app
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Responsive UI + Runtime Permission)
+  # 5. ANDROID (Injects Microphone Permission)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -636,6 +636,18 @@ jobs:
       - name: Resolve Projucer dependencies
         run: |
           ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+
+      - name: Inject Microphone Permission into Manifest
+        run: |
+          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            # Inject the permissions right before the <application> tag
+            sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+            echo "Manifest updated successfully."
+          else
+            echo "Manifest not found at $MANIFEST"
+            exit 1
+          fi
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
