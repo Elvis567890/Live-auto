@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          # FIXED: Using curl -L to follow redirects and bypass wget blocks
+          # Reliable download using curl -L
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
 
@@ -84,7 +84,7 @@ jobs:
 
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
-          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
+          <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="0" displaySplashScreen="0">
             <MAINGROUP id="main-group" name="AILiveBand">
               <GROUP id="source-group" name="Source">
                 <FILE id="main-cpp" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
@@ -398,6 +398,7 @@ jobs:
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
 
+              // Use plain FontOptions, no bold, to prevent Android font crash
               noteLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               chordLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
@@ -451,6 +452,8 @@ jobs:
 
           void MainComponent::startAudio() {
               if (deviceManager.getCurrentAudioDevice() != nullptr) return;
+              
+              // Initialize Arranger and SoundFont ONLY on start, to prevent app launch crash
               arranger = std::make_unique<Arranger>(chordInference, synth);
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
               if (err.isNotEmpty()) {
@@ -529,7 +532,7 @@ jobs:
               class MainWindow : public juce::DocumentWindow {
               public:
                   explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons) {
-                      // THIS FIXES THE ANDROID CRASH: Disable Title Bar & Resizing on Android
+                      // THIS FIXES THE ANDROID CRASH: Disable title bar & buttons on Android
                       #if !JUCE_ANDROID
                       setUsingNativeTitleBar(true);
                       setResizable(true, true);
@@ -612,7 +615,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Safe Python Manifest Injection & Crash Fixes)
+  # 5. ANDROID (Safe Manifest Overwrite & Crash Fixes)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -646,25 +649,28 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # THE CRITICAL ANDROID FIX: Python XML Injection for exports and permissions
-      - name: Safely Inject Permissions into Manifest
+      # THE CRITICAL ANDROID FIX: Completely overwrite AndroidManifest.xml with the exact required structure
+      - name: Overwrite AndroidManifest.xml
         run: |
-          python3 -c "
-          import xml.etree.ElementTree as ET
-          path = 'Builds/Android/app/src/main/AndroidManifest.xml'
-          tree = ET.parse(path)
-          root = tree.getroot()
-          ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
-          for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS']:
-              elem = ET.Element('uses-permission')
-              elem.set('{http://schemas.android.com/apk/res/android}name', perm)
-              root.append(elem)
-          app = root.find('application')
-          if app is not None:
-              for act in app.findall('activity'):
-                  act.set('{http://schemas.android.com/apk/res/android}exported', 'true')
-          tree.write(path, xml_declaration=True, encoding='utf-8')
-          "
+          cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                    package="com.ailiveband.app">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true" android:hardwareAccelerated="true" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name="com.rmsl.juce.JuceAppActivity"
+                            android:exported="true"
+                            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
 
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
