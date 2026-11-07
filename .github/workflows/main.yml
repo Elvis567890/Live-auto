@@ -40,7 +40,11 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
-          # MACOS MICROPHONE PERMISSION FIX
+          # 1. Embed the SoundFont for Desktop (Windows/Linux/Mac)
+          juce_add_binary_data(AILiveBandBinaryData SOURCES
+            Source/SoundFont.sf2
+          )
+
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
             COMPANY_NAME "AILiveBand"
@@ -68,7 +72,9 @@ jobs:
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
           )
 
+          # 2. Link the BinaryData
           target_link_libraries(AILiveBand PRIVATE
+            AILiveBandBinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
@@ -270,6 +276,8 @@ jobs:
 
           void SoundFontSynth::initialize(double sampleRate) {
               if (synth) tsf_close(synth);
+              // Safety check for missing binary data
+              if (BinaryData::SoundFont_sf2Size == 0) return; 
               synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
               if (synth) {
                   tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
@@ -394,9 +402,10 @@ jobs:
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
 
-              noteLabel.setFont(juce::Font(32.0f, juce::Font::bold));
-              chordLabel.setFont(juce::Font(32.0f, juce::Font::bold));
-              statusLabel.setFont(juce::Font(16.0f));
+              noteLabel.setFont(juce::Font(juce::FontOptions(32.0f, juce::Font::bold)));
+              chordLabel.setFont(juce::Font(juce::FontOptions(32.0f, juce::Font::bold)));
+              statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
+              
               noteLabel.setJustificationType(juce::Justification::centred);
               chordLabel.setJustificationType(juce::Justification::centred);
               statusLabel.setJustificationType(juce::Justification::centred);
@@ -441,7 +450,10 @@ jobs:
 
           void MainComponent::startAudio() {
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
-              if (err.isNotEmpty()) return;
+              if (err.isNotEmpty()) {
+                  statusLabel.setText("Audio Error: " + err, juce::dontSendNotification);
+                  return;
+              }
               deviceManager.addAudioCallback(this);
               statusLabel.setText("Audio: running", juce::dontSendNotification);
               startButton.setButtonText("Stop");
@@ -587,7 +599,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID
+  # 5. ANDROID (Surgical Manifest Fix)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -621,31 +633,14 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # ── ANDROID FIXES ──
+      # FIX: Surgical manifest injection instead of full overwrite
+      - name: Inject Microphone Permission into Manifest
+        run: |
+          MANIFEST="Builds/Android/app/src/main/AndroidManifest.xml"
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+
       - name: Fix Android SDK Location
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
-          
-      - name: Overwrite AndroidManifest.xml with Explicit Microphone Permissions
-        run: |
-          cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-                    package="com.ailiveband.app">
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true">
-                  <activity android:name="com.rmsl.juce.JuceAppActivity"
-                            android:exported="true"
-                            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
+        run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
 
       - name: Inject Memory Limits into gradle.properties
         run: |
@@ -654,7 +649,6 @@ jobs:
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
-      # ── ANDROID FIXES END ──
 
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.0.2 }
