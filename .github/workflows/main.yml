@@ -15,7 +15,6 @@ jobs:
     steps:
       - name: Download SoundFont and TinySoundFont
         run: |
-          # Reliable download using curl -L
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
 
@@ -398,7 +397,6 @@ jobs:
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(instrumentSelector);
 
-              // Use plain FontOptions, no bold, to prevent Android font crash
               noteLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               chordLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
               statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
@@ -453,7 +451,6 @@ jobs:
           void MainComponent::startAudio() {
               if (deviceManager.getCurrentAudioDevice() != nullptr) return;
               
-              // Initialize Arranger and SoundFont ONLY on start, to prevent app launch crash
               arranger = std::make_unique<Arranger>(chordInference, synth);
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
               if (err.isNotEmpty()) {
@@ -531,8 +528,13 @@ jobs:
               void systemRequestedQuit() override { quit(); }
               class MainWindow : public juce::DocumentWindow {
               public:
-                  explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, DocumentWindow::allButtons) {
-                      // THIS FIXES THE ANDROID CRASH: Disable title bar & buttons on Android
+                  explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, 
+                      #if JUCE_ANDROID
+                      0
+                      #else
+                      DocumentWindow::allButtons
+                      #endif
+                  ) {
                       #if !JUCE_ANDROID
                       setUsingNativeTitleBar(true);
                       setResizable(true, true);
@@ -615,7 +617,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Safe Manifest Overwrite & Crash Fixes)
+  # 5. ANDROID (Universal ABI & Activity Fix)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -649,7 +651,7 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # THE CRITICAL ANDROID FIX: Completely overwrite AndroidManifest.xml with a valid system theme
+      # 1. The Activity Name Fix (Stops the instant crash)
       - name: Overwrite AndroidManifest.xml
         run: |
           cat > Builds/Android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -660,7 +662,7 @@ jobs:
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <uses-feature android:glEsVersion="0x00020000" android:required="true" />
               <application android:label="AILiveBand" android:hasCode="true" android:allowBackup="true" android:hardwareAccelerated="true" android:theme="@android:style/Theme.NoTitleBar">
-                  <activity android:name="com.rmsl.juce.JuceAppActivity"
+                  <activity android:name="com.rmsl.juce.JuceActivity"
                             android:exported="true"
                             android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
                       <intent-filter>
@@ -671,6 +673,12 @@ jobs:
               </application>
           </manifest>
           EOF
+
+      # 2. The Universal ABI Fix (Ensures 32-bit and 64-bit libraries are built)
+      - name: Inject Universal ABIs into build.gradle
+        run: |
+          # Inject abiFilters so Gradle builds for all phones
+          sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
 
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
