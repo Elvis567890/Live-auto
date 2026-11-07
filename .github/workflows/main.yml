@@ -16,6 +16,7 @@ jobs:
       - name: Download SoundFont and TinySoundFont
         run: |
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
+          # 6MB SoundFont with ALL 128 Instruments, perfect for low-end phones
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
 
       - name: Create project files
@@ -81,8 +82,7 @@ jobs:
           )
           EOF
 
-          # The critical fix: Injecting androidPermissions directly into the Projucer config
-          # and setting useAppConfig="1" for correct JNI bridging.
+          # Projucer project
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -118,8 +118,7 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
             <EXPORTFORMATS>
-              <!-- Injecting Permissions directly here -->
-              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" androidPermissions="android.permission.RECORD_AUDIO;android.permission.MODIFY_AUDIO_SETTINGS">
+              <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" androidPermissions="android.permission.RECORD_AUDIO;android.permission.MODIFY_AUDIO_SETTINGS" minSdkVersion="21">
                 <CONFIGURATIONS>
                   <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand"/>
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1"/>
@@ -453,7 +452,6 @@ jobs:
 
           void MainComponent::startAudio() {
               if (deviceManager.getCurrentAudioDevice() != nullptr) return;
-              
               arranger = std::make_unique<Arranger>(chordInference, synth);
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
               if (err.isNotEmpty()) {
@@ -468,10 +466,7 @@ jobs:
           }
 
           void MainComponent::stopAudio() {
-              if (arranger) {
-                  arranger->stop();
-                  arranger.reset();
-              }
+              if (arranger) { arranger->stop(); arranger.reset(); }
               if (deviceManager.getCurrentAudioDevice() != nullptr) {
                   deviceManager.removeAudioCallback(this);
                   deviceManager.closeAudioDevice();
@@ -620,7 +615,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Relying on Projucer for Manifest & Gradle)
+  # 5. ANDROID (Low SDK & Universal ABIs)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -651,15 +646,16 @@ jobs:
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
       - name: Configure Projucer Global Paths
         run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-      
-      # Let Projucer generate the perfect Manifest and Gradle files
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
+      - name: Force Universal ABIs in build.gradle
+        run: |
+          sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
+
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
 
-      # Only inject memory limits (safe and required for large files)
       - name: Inject Memory Limits into gradle.properties
         run: |
           cat > Builds/Android/gradle.properties << 'EOF'
