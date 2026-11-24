@@ -1,5 +1,5 @@
 
-name: Build AFRINODE AI LIVE BAND
+name: AFRINODE AI LIVE BAND - Android
 
 on:
   workflow_dispatch:
@@ -10,12 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  build-android:
-    name: Build Android APK
+  build:
+    name: Build AFRINODE Android App
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Flutter
@@ -24,19 +24,22 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create Flutter application
+      - name: Generate Android project
         run: |
-          flutter create --org com.afrinode --project-name afrinode_live_band afrinode_live_band
-          cd afrinode_live_band
+          flutter create \
+            --org com.afrinode \
+            --project-name afrinode_live_band \
+            --platforms android \
+            afrinode_live_band
 
-      - name: Generate application dependencies
+      - name: Generate dependencies
         working-directory: afrinode_live_band
         run: |
           cat > pubspec.yaml <<'EOF'
           name: afrinode_live_band
-          description: AFRINODE AI Live Band Android client
+          description: AFRINODE AI LIVE BAND
           publish_to: none
-          version: 1.0.0+1
+          version: 3.0.0+1
 
           environment:
             sdk: ">=3.4.0 <4.0.0"
@@ -44,8 +47,7 @@ jobs:
           dependencies:
             flutter:
               sdk: flutter
-            flutter_midi_pro: ^4.0.4
-            record: ^6.1.2
+            flutter_midi_pro: 4.0.4
             web_socket_channel: ^3.0.3
             file_picker: ^10.3.3
 
@@ -60,29 +62,181 @@ jobs:
 
           flutter pub get
 
-      - name: Generate AFRINODE Android application
+      - name: Generate AFRINODE application
         working-directory: afrinode_live_band
         run: |
-          cat > lib/main.dart <<'EOF'
+          cat > lib/main.dart <<'DART'
           import 'dart:async';
           import 'dart:convert';
-          import 'dart:typed_data';
 
-          import 'package:file_picker/file_picker.dart';
           import 'package:flutter/material.dart';
+          import 'package:file_picker/file_picker.dart';
           import 'package:flutter_midi_pro/flutter_midi_pro.dart';
-          import 'package:record/record.dart';
           import 'package:web_socket_channel/web_socket_channel.dart';
 
           const serverUrl = String.fromEnvironment(
-            'SERVER_URL',
-            defaultValue: 'ws://13.140.90.83:8765',
+            'AFRINODE_SERVER_URL',
+            defaultValue: 'ws://13.140.90.83:8000/ws/band',
           );
 
-          const serverToken = String.fromEnvironment(
-            'SERVER_TOKEN',
+          const apiToken = String.fromEnvironment(
+            'AFRINODE_API_TOKEN',
             defaultValue: '',
           );
+
+          const gmNames = <String>[
+            'Acoustic Grand Piano',
+            'Bright Acoustic Piano',
+            'Electric Grand Piano',
+            'Honky-tonk Piano',
+            'Electric Piano 1',
+            'Electric Piano 2',
+            'Harpsichord',
+            'Clavinet',
+            'Celesta',
+            'Glockenspiel',
+            'Music Box',
+            'Vibraphone',
+            'Marimba',
+            'Xylophone',
+            'Tubular Bells',
+            'Dulcimer',
+            'Drawbar Organ',
+            'Percussive Organ',
+            'Rock Organ',
+            'Church Organ',
+            'Reed Organ',
+            'Accordion',
+            'Harmonica',
+            'Tango Accordion',
+            'Acoustic Guitar Nylon',
+            'Acoustic Guitar Steel',
+            'Electric Guitar Jazz',
+            'Electric Guitar Clean',
+            'Electric Guitar Muted',
+            'Overdriven Guitar',
+            'Distortion Guitar',
+            'Guitar Harmonics',
+            'Acoustic Bass',
+            'Electric Bass Finger',
+            'Electric Bass Pick',
+            'Fretless Bass',
+            'Slap Bass 1',
+            'Slap Bass 2',
+            'Synth Bass 1',
+            'Synth Bass 2',
+            'Violin',
+            'Viola',
+            'Cello',
+            'Contrabass',
+            'Tremolo Strings',
+            'Pizzicato Strings',
+            'Orchestral Harp',
+            'Timpani',
+            'String Ensemble 1',
+            'String Ensemble 2',
+            'SynthStrings 1',
+            'SynthStrings 2',
+            'Choir Aahs',
+            'Voice Oohs',
+            'Synth Voice',
+            'Orchestra Hit',
+            'Trumpet',
+            'Trombone',
+            'Tuba',
+            'Muted Trumpet',
+            'French Horn',
+            'Brass Section',
+            'SynthBrass 1',
+            'SynthBrass 2',
+            'Soprano Sax',
+            'Alto Sax',
+            'Tenor Sax',
+            'Baritone Sax',
+            'Oboe',
+            'English Horn',
+            'Bassoon',
+            'Clarinet',
+            'Piccolo',
+            'Flute',
+            'Recorder',
+            'Pan Flute',
+            'Blown Bottle',
+            'Shakuhachi',
+            'Whistle',
+            'Ocarina',
+            'Lead 1 Square',
+            'Lead 2 Sawtooth',
+            'Lead 3 Calliope',
+            'Lead 4 Chiff',
+            'Lead 5 Charang',
+            'Lead 6 Voice',
+            'Lead 7 Fifths',
+            'Lead 8 Bass Lead',
+            'Pad 1 New Age',
+            'Pad 2 Warm',
+            'Pad 3 Polysynth',
+            'Pad 4 Choir',
+            'Pad 5 Bowed',
+            'Pad 6 Metallic',
+            'Pad 7 Halo',
+            'Pad 8 Sweep',
+            'FX 1 Rain',
+            'FX 2 Soundtrack',
+            'FX 3 Crystal',
+            'FX 4 Atmosphere',
+            'FX 5 Brightness',
+            'FX 6 Goblins',
+            'FX 7 Echoes',
+            'FX 8 Sci-fi',
+            'Sitar',
+            'Banjo',
+            'Shamisen',
+            'Koto',
+            'Kalimba',
+            'Bag Pipe',
+            'Fiddle',
+            'Shanai',
+            'Tinkle Bell',
+            'Agogo',
+            'Steel Drums',
+            'Woodblock',
+            'Taiko Drum',
+            'Melodic Tom',
+            'Synth Drum',
+            'Reverse Cymbal',
+            'Guitar Fret Noise',
+            'Breath Noise',
+            'Seashore',
+            'Bird Tweet',
+            'Telephone Ring',
+            'Helicopter',
+            'Applause',
+            'Gunshot',
+          ];
+
+          const styles = [
+            'worship',
+            'contemporary_worship',
+            'gospel',
+            'african_gospel',
+            'afrobeat',
+            'jazz',
+            'rock',
+            'pop',
+          ];
+
+          const sections = [
+            'UNKNOWN',
+            'INTRO',
+            'VERSE',
+            'BUILD',
+            'CHORUS',
+            'BREAKDOWN',
+            'INTERLUDE',
+            'BRIDGE',
+            'OUTRO',
+          ];
 
           void main() {
             WidgetsFlutterBinding.ensureInitialized();
@@ -95,70 +249,96 @@ jobs:
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
-                debugShowCheckedModeBanner: false,
                 title: 'AFRINODE AI LIVE BAND',
+                debugShowCheckedModeBanner: false,
                 theme: ThemeData(
                   brightness: Brightness.dark,
                   colorSchemeSeed: const Color(0xFFD4AF37),
                   useMaterial3: true,
                 ),
-                home: const LiveBandScreen(),
+                home: const BandScreen(),
               );
             }
           }
 
-          class LiveBandScreen extends StatefulWidget {
-            const LiveBandScreen({super.key});
+          class BandScreen extends StatefulWidget {
+            const BandScreen({super.key});
 
             @override
-            State<LiveBandScreen> createState() => _LiveBandScreenState();
+            State<BandScreen> createState() => _BandScreenState();
           }
 
-          class _LiveBandScreenState extends State<LiveBandScreen> {
+          class _BandScreenState extends State<BandScreen> {
             final MidiPro midi = MidiPro();
-            final AudioRecorder recorder = AudioRecorder();
+
+            final bpmController = TextEditingController(text: '100');
+            final keyController = TextEditingController(text: 'C');
+            final chordController = TextEditingController(text: 'C');
 
             WebSocketChannel? socket;
-            StreamSubscription? socketSubscription;
-            StreamSubscription<Uint8List>? microphoneSubscription;
+            StreamSubscription? subscription;
 
             int? soundfontId;
+            int selectedProgram = 0;
+
             bool synthReady = false;
             bool connected = false;
-            bool microphoneRunning = false;
             bool busy = false;
 
-            String status = 'Load a SoundFont to begin';
-            String soundfontName = 'No SoundFont selected';
+            String style = 'worship';
+            String section = 'UNKNOWN';
+            String status = 'Initialize the MIDI synthesizer';
+            String soundfontName = 'No SoundFont loaded';
+
+            double energy = 0.5;
+            double confidence = 0.8;
+            bool singerActive = true;
+
+            Map<String, dynamic> arrangement = {};
+            Map<String, dynamic> serverInstruments = {};
 
             @override
-            void dispose() {
-              microphoneSubscription?.cancel();
-              socketSubscription?.cancel();
-              socket?.sink.close();
-              recorder.dispose();
-              if (midi.isInitialized) {
-                midi.dispose();
-              }
-              super.dispose();
+            void initState() {
+              super.initState();
+              initializeSynth();
             }
 
-            Future<void> loadSoundFont() async {
+            Future<void> initializeSynth() async {
+              try {
+                await midi.init(
+                  sampleRate: 44100,
+                  bufferSize: 64,
+                  polyphony: 128,
+                );
+
+                await midi.setMasterGain(1.0);
+
+                await midi.setReverb(
+                  enabled: true,
+                  roomSize: 0.6,
+                  level: 0.8,
+                );
+
+                await midi.setChorus(enabled: true);
+
+                setState(() {
+                  synthReady = true;
+                  status = 'MIDI engine ready. Load your SoundFont.';
+                });
+              } catch (e) {
+                setState(() => status = 'Synthesizer error: $e');
+              }
+            }
+
+            Future<void> loadSoundfont() async {
+              if (!synthReady || busy) return;
+
               setState(() => busy = true);
 
               try {
-                if (!midi.isInitialized) {
-                  await midi.init(
-                    sampleRate: 44100,
-                    bufferSize: 128,
-                    polyphony: 128,
-                  );
-                }
-
                 final result = await FilePicker.platform.pickFiles(
                   type: FileType.custom,
                   allowedExtensions: ['sf2'],
-                  withData: false,
                 );
 
                 if (result == null || result.files.single.path == null) {
@@ -169,59 +349,61 @@ jobs:
                 final file = result.files.single;
 
                 soundfontId = await midi.loadSoundfontFile(
-                  path: file.path!,
+                  filePath: file.path!,
                   bank: 0,
                   program: 0,
                 );
 
                 setState(() {
-                  synthReady = true;
                   soundfontName = file.name;
-                  status = 'SoundFont loaded';
+                  status = 'SoundFont loaded successfully';
                   busy = false;
                 });
+
+                await midi.selectInstrument(
+                  sfId: soundfontId!,
+                  channel: 0,
+                  bank: 0,
+                  program: 0,
+                );
               } catch (e) {
                 setState(() {
-                  status = 'SoundFont error: $e';
                   busy = false;
+                  status = 'SoundFont error: $e';
                 });
               }
             }
 
             Future<void> connectServer() async {
-              if (serverToken.isEmpty) {
-                setState(() => status = 'Missing server token in APK build');
+              if (apiToken.isEmpty) {
+                setState(() => status = 'API token missing from build');
                 return;
               }
 
               try {
-                final newSocket = WebSocketChannel.connect(
+                final channel = WebSocketChannel.connect(
                   Uri.parse(serverUrl),
+                  headers: {
+                    'Authorization': 'Bearer $apiToken',
+                  },
                 );
 
-                await newSocket.ready;
+                await channel.ready;
 
-                socket = newSocket;
+                socket = channel;
 
-                socket!.sink.add(jsonEncode({
-                  'type': 'auth',
-                  'token': serverToken,
-                  'client': 'AFRINODE_ANDROID',
-                  'protocol': 1,
-                }));
-
-                socketSubscription = socket!.stream.listen(
-                  handleServerMessage,
+                subscription = channel.stream.listen(
+                  receiveServerMessage,
                   onError: (error) {
                     setState(() {
                       connected = false;
-                      status = 'Connection error: $error';
+                      status = 'WebSocket error: $error';
                     });
                   },
                   onDone: () {
                     setState(() {
                       connected = false;
-                      status = 'Server disconnected';
+                      status = 'Server connection closed';
                     });
                   },
                 );
@@ -230,123 +412,264 @@ jobs:
                   connected = true;
                   status = 'Connected to AFRINODE server';
                 });
+
+                sendMessage({
+                  'type': 'get_status',
+                });
               } catch (e) {
                 setState(() {
                   connected = false;
-                  status = 'Could not connect: $e';
+                  status = 'Connection failed: $e';
                 });
               }
             }
 
-            void handleServerMessage(dynamic message) {
+            void sendMessage(Map<String, dynamic> message) {
+              if (!connected || socket == null) return;
+
+              socket!.sink.add(jsonEncode(message));
+            }
+
+            void sendAnalysis() {
+              final bpm = double.tryParse(bpmController.text) ?? 100;
+
+              if (bpm < 40 || bpm > 240) {
+                setState(() => status = 'BPM must be between 40 and 240');
+                return;
+              }
+
+              final data = {
+                'bpm': bpm,
+                'key': keyController.text.trim().isEmpty
+                    ? 'C'
+                    : keyController.text.trim(),
+                'chord': chordController.text.trim().isEmpty
+                    ? 'C'
+                    : chordController.text.trim(),
+                'energy': energy,
+                'confidence': confidence,
+                'section': section,
+                'style': style,
+                'singer_active': singerActive,
+                'bar_index': 0,
+                'beat_position': 0,
+                'detected_notes': <String>[],
+              };
+
+              sendMessage({
+                'type': 'analysis',
+                'data': data,
+              });
+
+              setState(() => status = 'Analysis sent. Waiting for arrangement.');
+            }
+
+            Future<void> receiveServerMessage(dynamic message) async {
+              if (message is! String) return;
+
               try {
-                if (message is! String) return;
+                final decoded = jsonDecode(message);
 
-                final data = jsonDecode(message);
+                if (decoded is! Map) return;
 
-                if (data['type'] == 'status') {
+                final type = decoded['type']?.toString();
+
+                if (type == 'connected') {
                   setState(() {
-                    status = data['message']?.toString() ?? 'Server status';
+                    status = decoded['message']?.toString() ??
+                        'Server connected';
                   });
                   return;
                 }
 
-                if (!synthReady || soundfontId == null) return;
-
-                final type = data['type']?.toString();
-                final channel = (data['channel'] ?? 0) as int;
-
-                if (type == 'note_on') {
-                  midi.playNote(
-                    sfId: soundfontId!,
-                    channel: channel,
-                    key: data['note'] as int,
-                    velocity: data['velocity'] as int? ?? 90,
-                  );
-                } else if (type == 'note_off') {
-                  midi.stopNote(
-                    sfId: soundfontId!,
-                    channel: channel,
-                    key: data['note'] as int,
-                  );
-                } else if (type == 'program_change') {
-                  midi.selectInstrument(
-                    sfId: soundfontId!,
-                    channel: channel,
-                    bank: data['bank'] as int? ?? 0,
-                    program: data['program'] as int,
-                  );
-                } else if (type == 'panic') {
-                  midi.panic();
-                }
-              } catch (e) {
-                setState(() => status = 'MIDI message error: $e');
-              }
-            }
-
-            Future<void> startMicrophone() async {
-              if (!connected || socket == null) {
-                setState(() => status = 'Connect to the server first');
-                return;
-              }
-
-              try {
-                final permitted = await recorder.hasPermission();
-
-                if (!permitted) {
-                  setState(() => status = 'Microphone permission denied');
+                if (type == 'heartbeat_ack') {
+                  setState(() => status = 'Server heartbeat received');
                   return;
                 }
 
-                final audioStream = await recorder.startStream(
-                  const RecordConfig(
-                    encoder: AudioEncoder.pcm16bits,
-                    sampleRate: 16000,
-                    numChannels: 1,
-                  ),
-                );
+                if (type == 'status') {
+                  setState(() {
+                    status = decoded['status']?.toString() ??
+                        'Server online';
+                  });
+                  return;
+                }
 
-                microphoneSubscription = audioStream.listen((audio) {
-                  if (connected && socket != null) {
-                    socket!.sink.add(audio);
+                if (type == 'error') {
+                  setState(() {
+                    status = decoded['message']?.toString() ??
+                        'Server returned an error';
+                  });
+                  return;
+                }
+
+                if (type == 'arrangement') {
+                  final data = decoded['data'];
+
+                  if (data is! Map) {
+                    setState(() => status = 'Invalid arrangement response');
+                    return;
                   }
-                });
 
-                setState(() {
-                  microphoneRunning = true;
-                  status = 'Microphone streaming to server';
-                });
+                  final instruments = data['instruments'];
+
+                  if (instruments is! Map) {
+                    setState(() => status = 'No instruments in arrangement');
+                    return;
+                  }
+
+                  setState(() {
+                    arrangement = Map<String, dynamic>.from(data);
+                    serverInstruments =
+                        Map<String, dynamic>.from(instruments);
+                    status = 'Arrangement received from server';
+                  });
+
+                  await applyInstrumentPrograms();
+                  return;
+                }
               } catch (e) {
-                setState(() => status = 'Microphone error: $e');
+                setState(() => status = 'Message processing error: $e');
               }
             }
 
-            Future<void> stopMicrophone() async {
-              await microphoneSubscription?.cancel();
-              microphoneSubscription = null;
-              await recorder.stop();
+            Future<void> applyInstrumentPrograms() async {
+              if (soundfontId == null) {
+                setState(() {
+                  status = 'Arrangement received. Load an SF2 to select instruments.';
+                });
+                return;
+              }
+
+              int applied = 0;
+
+              for (final entry in serverInstruments.entries) {
+                final value = entry.value;
+
+                if (value is! Map) continue;
+                if (value['enabled'] != true) continue;
+
+                final program = value['program'];
+                final channel = value['channel'];
+
+                if (program is! num || channel is! num) continue;
+
+                final p = program.toInt().clamp(0, 127);
+                final c = channel.toInt().clamp(0, 15);
+
+                await midi.selectInstrument(
+                  sfId: soundfontId!,
+                  channel: c,
+                  bank: 0,
+                  program: p,
+                );
+
+                applied++;
+              }
 
               setState(() {
-                microphoneRunning = false;
-                status = 'Microphone stopped';
+                status = '$applied server-selected instrument programs applied';
               });
+            }
+
+            Future<void> testSound() async {
+              if (soundfontId == null) {
+                setState(() => status = 'Load a SoundFont first');
+                return;
+              }
+
+              await midi.selectInstrument(
+                sfId: soundfontId!,
+                channel: 0,
+                bank: 0,
+                program: selectedProgram,
+              );
+
+              await midi.playNote(
+                sfId: soundfontId!,
+                channel: 0,
+                key: 60,
+                velocity: 110,
+              );
+
+              await Future.delayed(const Duration(milliseconds: 700));
+
+              await midi.stopNote(
+                sfId: soundfontId!,
+                channel: 0,
+                key: 60,
+              );
             }
 
             Future<void> disconnect() async {
-              await stopMicrophoneIfRunning();
-              await socketSubscription?.cancel();
+              await subscription?.cancel();
+              subscription = null;
+
               await socket?.sink.close();
+              socket = null;
+
+              if (synthReady) {
+                await midi.panic();
+              }
 
               setState(() {
                 connected = false;
-                status = 'Disconnected';
+                status = 'Disconnected from server';
               });
             }
 
-            Future<void> stopMicrophoneIfRunning() async {
-              if (microphoneRunning) {
-                await stopMicrophone();
+            @override
+            void dispose() {
+              subscription?.cancel();
+              socket?.sink.close();
+
+              bpmController.dispose();
+              keyController.dispose();
+              chordController.dispose();
+
+              if (midi.isInitialized) {
+                midi.dispose();
               }
+
+              super.dispose();
+            }
+
+            Widget instrumentList() {
+              if (serverInstruments.isEmpty) {
+                return const Text('No arrangement received yet.');
+              }
+
+              return Column(
+                children: serverInstruments.entries.map((entry) {
+                  final item = entry.value;
+
+                  if (item is! Map) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final program = item['program'] is num
+                      ? (item['program'] as num).toInt()
+                      : 0;
+
+                  final channel = item['channel'] ?? 0;
+                  final name = program >= 0 && program < 128
+                      ? gmNames[program]
+                      : 'Unknown instrument';
+
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.music_note),
+                    title: Text(entry.key.replaceAll('_', ' ').toUpperCase()),
+                    subtitle: Text(
+                      '$name · Program $program · Channel $channel',
+                    ),
+                    trailing: const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                    ),
+                  );
+                }).toList(),
+              );
             }
 
             @override
@@ -360,41 +683,85 @@ jobs:
                 ),
                 body: SafeArea(
                   child: ListView(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(16),
                     children: [
                       const Icon(
                         Icons.graphic_eq,
-                        size: 76,
                         color: Color(0xFFD4AF37),
+                        size: 64,
                       ),
-                      const SizedBox(height: 12),
+
                       const Center(
                         child: Text(
-                          'LIVE BAND CONTROL',
+                          'SERVER-CONTROLLED MIDI BAND',
                           style: TextStyle(
-                            fontSize: 21,
                             fontWeight: FontWeight.bold,
+                            fontSize: 18,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+
+                      const SizedBox(height: 18),
+
                       Card(
                         child: ListTile(
                           leading: Icon(
-                            synthReady ? Icons.check_circle : Icons.music_note,
-                            color: synthReady ? Colors.green : Colors.amber,
+                            synthReady ? Icons.check_circle : Icons.error,
+                            color: synthReady ? Colors.green : Colors.red,
                           ),
-                          title: const Text('Instrument synthesizer'),
+                          title: const Text('MIDI synthesizer'),
                           subtitle: Text(soundfontName),
-                          trailing: const Icon(Icons.library_music),
                         ),
                       ),
+
                       ElevatedButton.icon(
-                        onPressed: busy ? null : loadSoundFont,
-                        icon: const Icon(Icons.folder_open),
+                        onPressed: busy ? null : loadSoundfont,
+                        icon: const Icon(Icons.library_music),
                         label: const Text('LOAD SOUNDFONT (.SF2)'),
                       ),
-                      const SizedBox(height: 16),
+
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '128 GENERAL MIDI PROGRAMS',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 12),
+                              DropdownButtonFormField<int>(
+                                value: selectedProgram,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Local sound test instrument',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: List.generate(
+                                  128,
+                                  (i) => DropdownMenuItem(
+                                    value: i,
+                                    child: Text('${i + 1}. ${gmNames[i]}'),
+                                  ),
+                                ),
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() => selectedProgram = value);
+                                  }
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                onPressed: testSound,
+                                icon: const Icon(Icons.play_arrow),
+                                label: const Text('TEST LOCAL INSTRUMENT'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                       Card(
                         child: ListTile(
                           leading: Icon(
@@ -402,9 +769,10 @@ jobs:
                             color: connected ? Colors.green : Colors.orange,
                           ),
                           title: const Text('AFRINODE VPS'),
-                          subtitle: const Text(serverUrl),
+                          subtitle: Text(serverUrl),
                         ),
                       ),
+
                       ElevatedButton.icon(
                         onPressed: connected ? disconnect : connectServer,
                         icon: Icon(
@@ -414,48 +782,186 @@ jobs:
                           connected ? 'DISCONNECT SERVER' : 'CONNECT SERVER',
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        onPressed: connected
-                            ? (microphoneRunning
-                                ? stopMicrophone
-                                : startMicrophone)
-                            : null,
-                        icon: Icon(
-                          microphoneRunning ? Icons.mic_off : Icons.mic,
-                        ),
-                        label: Text(
-                          microphoneRunning
-                              ? 'STOP MICROPHONE'
-                              : 'START LIVE INPUT',
-                        ),
-                      ),
-                      const SizedBox(height: 24),
+
+                      const SizedBox(height: 18),
+
                       Card(
                         child: Padding(
-                          padding: const EdgeInsets.all(18),
+                          padding: const EdgeInsets.all(14),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                'SYSTEM STATUS',
+                                'ANALYSIS INPUT',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFD4AF37),
+                                ),
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              TextField(
+                                controller: bpmController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Tempo (BPM)',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+
+                              const SizedBox(height: 10),
+
+                              TextField(
+                                controller: keyController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Musical key',
+                                  hintText: 'C, D, E, F, G, A, B',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+
+                              const SizedBox(height: 10),
+
+                              TextField(
+                                controller: chordController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Current chord',
+                                  hintText: 'C, Am, F, G',
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              DropdownButtonFormField<String>(
+                                value: style,
+                                decoration: const InputDecoration(
+                                  labelText: 'Music style',
+                                ),
+                                items: styles.map((value) {
+                                  return DropdownMenuItem(
+                                    value: value,
+                                    child: Text(value.replaceAll('_', ' ')),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() => style = value);
+                                  }
+                                },
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              DropdownButtonFormField<String>(
+                                value: section,
+                                decoration: const InputDecoration(
+                                  labelText: 'Song section',
+                                ),
+                                items: sections.map((value) {
+                                  return DropdownMenuItem(
+                                    value: value,
+                                    child: Text(value),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    setState(() => section = value);
+                                  }
+                                },
+                              ),
+
+                              const SizedBox(height: 12),
+
+                              Text('Energy: ${energy.toStringAsFixed(2)}'),
+                              Slider(
+                                value: energy,
+                                onChanged: (value) {
+                                  setState(() => energy = value);
+                                },
+                              ),
+
+                              Text(
+                                'Analysis confidence: ${confidence.toStringAsFixed(2)}',
+                              ),
+                              Slider(
+                                value: confidence,
+                                onChanged: (value) {
+                                  setState(() => confidence = value);
+                                },
+                              ),
+
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('Singer active'),
+                                value: singerActive,
+                                onChanged: (value) {
+                                  setState(() => singerActive = value);
+                                },
+                              ),
+
+                              const SizedBox(height: 10),
+
+                              ElevatedButton.icon(
+                                onPressed: connected ? sendAnalysis : null,
+                                icon: const Icon(Icons.send),
+                                label: const Text('SEND ANALYSIS TO SERVER'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'SERVER ARRANGEMENT',
                                 style: TextStyle(
                                   color: Color(0xFFD4AF37),
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              Text(status),
+                              const SizedBox(height: 8),
+                              Text('Style: ${arrangement['style'] ?? '-'}'),
+                              Text('Section: ${arrangement['section'] ?? '-'}'),
+                              Text('Tempo: ${arrangement['bpm'] ?? '-'} BPM'),
+                              Text('Key: ${arrangement['key'] ?? '-'}'),
+                              Text('Chord: ${arrangement['chord'] ?? '-'}'),
+                              Text('Fill: ${arrangement['fill'] ?? '-'}'),
+                              const Divider(),
+                              const Text(
+                                'INSTRUMENTS SELECTED BY SERVER',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              instrumentList(),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'The server sends MIDI instructions. '
-                        'The Android synthesizer renders those instructions '
-                        'using the selected SoundFont.',
-                        textAlign: TextAlign.center,
+
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'CONNECTION STATUS',
+                                style: TextStyle(
+                                  color: Color(0xFFD4AF37),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(status),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -463,196 +969,61 @@ jobs:
               );
             }
           }
-          EOF
+          DART
 
-      - name: Configure Android microphone and network permissions
+      - name: Configure Android permissions
         working-directory: afrinode_live_band
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          content = path.read_text()
 
-          s = s.replace(
-              '<application',
-              '<uses-permission android:name="android.permission.INTERNET"/>'
-              '<uses-permission android:name="android.permission.RECORD_AUDIO"/>'
+          permissions = """
+              <uses-permission android:name="android.permission.INTERNET"/>
+          """
+
+          content = content.replace(
+              "<application",
+              permissions + "\n    <application",
+              1
+          )
+
+          content = content.replace(
+              "<application",
               '<application android:usesCleartextTraffic="true"',
               1
           )
 
-          p.write_text(s)
+          path.write_text(content)
           PY
 
-      - name: Build release APK
+      - name: Build release Android APK
         working-directory: afrinode_live_band
         env:
-          LIVE_BAND_TOKEN: ${{ secrets.LIVE_BAND_TOKEN }}
+          SERVER_URL: ${{ secrets.AFRINODE_SERVER_URL }}
+          API_TOKEN: ${{ secrets.AFRINODE_API_TOKEN }}
         run: |
-          flutter pub get
-          flutter build apk --release \
-            --dart-define=SERVER_URL=ws://13.140.90.83:8765 \
-            --dart-define=SERVER_TOKEN="$LIVE_BAND_TOKEN"
+          if [ -z "$SERVER_URL" ]; then
+            echo "Missing AFRINODE_SERVER_URL secret"
+            exit 1
+          fi
 
-      - name: Upload Android APK
+          if [ -z "$API_TOKEN" ]; then
+            echo "Missing AFRINODE_API_TOKEN secret"
+            exit 1
+          fi
+
+          flutter pub get
+
+          flutter build apk --release \
+            --dart-define=AFRINODE_SERVER_URL="$SERVER_URL" \
+            --dart-define=AFRINODE_API_TOKEN="$API_TOKEN"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AFRINODE-AI-LIVE-BAND-APK
+          name: AFRINODE-AI-LIVE-BAND-ANDROID
           path: afrinode_live_band/build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Prepare server files
-        run: |
-          mkdir -p server
-
-          cat > server/server.py <<'PY'
-          import asyncio
-          import json
-          import os
-          import websockets
-
-          TOKEN = os.environ["LIVE_BAND_TOKEN"]
-
-          async def send_test_sequence(ws):
-              await ws.send(json.dumps({
-                  "type": "status",
-                  "message": "Authenticated. MIDI connection test running."
-              }))
-
-              # This is a connection and soundfont playback test,
-              # NOT the finished AI arrangement engine.
-              notes = [60, 64, 67, 72]
-
-              while True:
-                  for note in notes:
-                      await ws.send(json.dumps({
-                          "type": "note_on",
-                          "channel": 0,
-                          "note": note,
-                          "velocity": 75
-                      }))
-                      await asyncio.sleep(0.45)
-
-                      await ws.send(json.dumps({
-                          "type": "note_off",
-                          "channel": 0,
-                          "note": note
-                      }))
-                      await asyncio.sleep(0.10)
-
-          async def handler(ws):
-              try:
-                  first = await asyncio.wait_for(ws.recv(), timeout=10)
-
-                  if not isinstance(first, str):
-                      await ws.close(code=1008, reason="Authentication required")
-                      return
-
-                  auth = json.loads(first)
-
-                  if auth.get("type") != "auth" or auth.get("token") != TOKEN:
-                      await ws.close(code=1008, reason="Invalid token")
-                      return
-
-                  sender = asyncio.create_task(send_test_sequence(ws))
-
-                  try:
-                      async for message in ws:
-                          if isinstance(message, bytes):
-                              # Incoming 16 kHz mono PCM from the Android app.
-                              # The production analysis pipeline will process it.
-                              continue
-
-                          try:
-                              data = json.loads(message)
-                              print("CLIENT:", data, flush=True)
-                          except Exception:
-                              pass
-                  finally:
-                      sender.cancel()
-
-              except Exception as exc:
-                  print("CONNECTION ERROR:", exc, flush=True)
-
-          async def main():
-              print("AFRINODE LIVE BAND SERVER STARTING", flush=True)
-
-              async with websockets.serve(
-                  handler,
-                  "0.0.0.0",
-                  8765,
-                  max_size=2**20,
-                  ping_interval=20,
-                  ping_timeout=20
-              ):
-                  print("Listening on port 8765", flush=True)
-                  await asyncio.Future()
-
-          if __name__ == "__main__":
-              asyncio.run(main())
-          PY
-
-      - name: Create VPS deployment directory
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            mkdir -p /opt/afrinode-live-band
-
-      - name: Copy server to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "server/server.py"
-          target: "/opt/afrinode-live-band"
-          strip_components: 1
-
-      - name: Install and start AFRINODE server
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          LIVE_BAND_TOKEN: ${{ secrets.LIVE_BAND_TOKEN }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: LIVE_BAND_TOKEN
-          script: |
-            set -e
-
-            cd /opt/afrinode-live-band
-
-            apt-get update
-            apt-get install -y python3 python3-venv
-
-            python3 -m venv venv
-            venv/bin/pip install --upgrade pip
-            venv/bin/pip install "websockets>=14,<16"
-
-            printf 'LIVE_BAND_TOKEN=%s\n' "$LIVE_BAND_TOKEN" > .env
-            chmod 600 .env
-
-            cat > /etc/systemd/system/afrinode-live-band.service <<'EOF'
-            [Unit]
-            Description=AFRINODE AI Live Band Server
-            After=network.target
-
-            [Service]
-            Type=simple
-            WorkingDirectory=/opt/afrinode-live-band
-            EnvironmentFile=/opt/afrinode-live-band/.env
-            ExecStart=/opt/afrinode-live-band/venv/bin/python /opt/afrinode-live-band/server.py
-            Restart=always
-            RestartSec=5
-
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-
-            systemctl daemon-reload
-            systemctl enable afrinode-live-band
-            systemctl restart afrinode-live-band
-            systemctl --no-pager --full status afrinode-live-band
+          if-no-files-found: error
