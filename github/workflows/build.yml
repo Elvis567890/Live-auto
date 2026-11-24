@@ -1,771 +1,658 @@
 
-name: AFRINODE AI LIVE BAND - Project Generator
+name: Build AFRINODE AI LIVE BAND
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/generate-afrinode-ai-live-band.yml
+    branches: [main]
 
 permissions:
-  contents: write
-
-concurrency:
-  group: afrinode-live-band-generator
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  generate-project:
-    name: Generate AFRINODE Application
+  build-android:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install generation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3 \
-            python3-pip \
-            cmake \
-            ninja-build \
-            build-essential \
-            pkg-config \
-            libasound2-dev \
-            libjack-jackd2-dev \
-            libfreetype6-dev \
-            libx11-dev \
-            libxcomposite-dev \
-            libxcursor-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxrender-dev \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-      - name: Generate project directories
+      - name: Create Flutter application
         run: |
-          mkdir -p Source
-          mkdir -p Assets
-          mkdir -p Tests
+          flutter create --org com.afrinode --project-name afrinode_live_band afrinode_live_band
+          cd afrinode_live_band
+
+      - name: Generate application dependencies
+        working-directory: afrinode_live_band
+        run: |
+          cat > pubspec.yaml <<'EOF'
+          name: afrinode_live_band
+          description: AFRINODE AI Live Band Android client
+          publish_to: none
+          version: 1.0.0+1
+
+          environment:
+            sdk: ">=3.4.0 <4.0.0"
+
+          dependencies:
+            flutter:
+              sdk: flutter
+            flutter_midi_pro: ^4.0.4
+            record: ^6.1.2
+            web_socket_channel: ^3.0.3
+            file_picker: ^10.3.3
+
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^5.0.0
+
+          flutter:
+            uses-material-design: true
+          EOF
+
+          flutter pub get
+
+      - name: Generate AFRINODE Android application
+        working-directory: afrinode_live_band
+        run: |
+          cat > lib/main.dart <<'EOF'
+          import 'dart:async';
+          import 'dart:convert';
+          import 'dart:typed_data';
+
+          import 'package:file_picker/file_picker.dart';
+          import 'package:flutter/material.dart';
+          import 'package:flutter_midi_pro/flutter_midi_pro.dart';
+          import 'package:record/record.dart';
+          import 'package:web_socket_channel/web_socket_channel.dart';
+
+          const serverUrl = String.fromEnvironment(
+            'SERVER_URL',
+            defaultValue: 'ws://13.140.90.83:8765',
+          );
+
+          const serverToken = String.fromEnvironment(
+            'SERVER_TOKEN',
+            defaultValue: '',
+          );
+
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const AfriNodeApp());
+          }
+
+          class AfriNodeApp extends StatelessWidget {
+            const AfriNodeApp({super.key});
+
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                title: 'AFRINODE AI LIVE BAND',
+                theme: ThemeData(
+                  brightness: Brightness.dark,
+                  colorSchemeSeed: const Color(0xFFD4AF37),
+                  useMaterial3: true,
+                ),
+                home: const LiveBandScreen(),
+              );
+            }
+          }
+
+          class LiveBandScreen extends StatefulWidget {
+            const LiveBandScreen({super.key});
+
+            @override
+            State<LiveBandScreen> createState() => _LiveBandScreenState();
+          }
+
+          class _LiveBandScreenState extends State<LiveBandScreen> {
+            final MidiPro midi = MidiPro();
+            final AudioRecorder recorder = AudioRecorder();
+
+            WebSocketChannel? socket;
+            StreamSubscription? socketSubscription;
+            StreamSubscription<Uint8List>? microphoneSubscription;
+
+            int? soundfontId;
+            bool synthReady = false;
+            bool connected = false;
+            bool microphoneRunning = false;
+            bool busy = false;
+
+            String status = 'Load a SoundFont to begin';
+            String soundfontName = 'No SoundFont selected';
+
+            @override
+            void dispose() {
+              microphoneSubscription?.cancel();
+              socketSubscription?.cancel();
+              socket?.sink.close();
+              recorder.dispose();
+              if (midi.isInitialized) {
+                midi.dispose();
+              }
+              super.dispose();
+            }
+
+            Future<void> loadSoundFont() async {
+              setState(() => busy = true);
+
+              try {
+                if (!midi.isInitialized) {
+                  await midi.init(
+                    sampleRate: 44100,
+                    bufferSize: 128,
+                    polyphony: 128,
+                  );
+                }
+
+                final result = await FilePicker.platform.pickFiles(
+                  type: FileType.custom,
+                  allowedExtensions: ['sf2'],
+                  withData: false,
+                );
+
+                if (result == null || result.files.single.path == null) {
+                  setState(() => busy = false);
+                  return;
+                }
+
+                final file = result.files.single;
+
+                soundfontId = await midi.loadSoundfontFile(
+                  path: file.path!,
+                  bank: 0,
+                  program: 0,
+                );
+
+                setState(() {
+                  synthReady = true;
+                  soundfontName = file.name;
+                  status = 'SoundFont loaded';
+                  busy = false;
+                });
+              } catch (e) {
+                setState(() {
+                  status = 'SoundFont error: $e';
+                  busy = false;
+                });
+              }
+            }
+
+            Future<void> connectServer() async {
+              if (serverToken.isEmpty) {
+                setState(() => status = 'Missing server token in APK build');
+                return;
+              }
+
+              try {
+                final newSocket = WebSocketChannel.connect(
+                  Uri.parse(serverUrl),
+                );
+
+                await newSocket.ready;
+
+                socket = newSocket;
+
+                socket!.sink.add(jsonEncode({
+                  'type': 'auth',
+                  'token': serverToken,
+                  'client': 'AFRINODE_ANDROID',
+                  'protocol': 1,
+                }));
+
+                socketSubscription = socket!.stream.listen(
+                  handleServerMessage,
+                  onError: (error) {
+                    setState(() {
+                      connected = false;
+                      status = 'Connection error: $error';
+                    });
+                  },
+                  onDone: () {
+                    setState(() {
+                      connected = false;
+                      status = 'Server disconnected';
+                    });
+                  },
+                );
+
+                setState(() {
+                  connected = true;
+                  status = 'Connected to AFRINODE server';
+                });
+              } catch (e) {
+                setState(() {
+                  connected = false;
+                  status = 'Could not connect: $e';
+                });
+              }
+            }
+
+            void handleServerMessage(dynamic message) {
+              try {
+                if (message is! String) return;
+
+                final data = jsonDecode(message);
+
+                if (data['type'] == 'status') {
+                  setState(() {
+                    status = data['message']?.toString() ?? 'Server status';
+                  });
+                  return;
+                }
+
+                if (!synthReady || soundfontId == null) return;
+
+                final type = data['type']?.toString();
+                final channel = (data['channel'] ?? 0) as int;
+
+                if (type == 'note_on') {
+                  midi.playNote(
+                    sfId: soundfontId!,
+                    channel: channel,
+                    key: data['note'] as int,
+                    velocity: data['velocity'] as int? ?? 90,
+                  );
+                } else if (type == 'note_off') {
+                  midi.stopNote(
+                    sfId: soundfontId!,
+                    channel: channel,
+                    key: data['note'] as int,
+                  );
+                } else if (type == 'program_change') {
+                  midi.selectInstrument(
+                    sfId: soundfontId!,
+                    channel: channel,
+                    bank: data['bank'] as int? ?? 0,
+                    program: data['program'] as int,
+                  );
+                } else if (type == 'panic') {
+                  midi.panic();
+                }
+              } catch (e) {
+                setState(() => status = 'MIDI message error: $e');
+              }
+            }
+
+            Future<void> startMicrophone() async {
+              if (!connected || socket == null) {
+                setState(() => status = 'Connect to the server first');
+                return;
+              }
+
+              try {
+                final permitted = await recorder.hasPermission();
+
+                if (!permitted) {
+                  setState(() => status = 'Microphone permission denied');
+                  return;
+                }
+
+                final audioStream = await recorder.startStream(
+                  const RecordConfig(
+                    encoder: AudioEncoder.pcm16bits,
+                    sampleRate: 16000,
+                    numChannels: 1,
+                  ),
+                );
+
+                microphoneSubscription = audioStream.listen((audio) {
+                  if (connected && socket != null) {
+                    socket!.sink.add(audio);
+                  }
+                });
+
+                setState(() {
+                  microphoneRunning = true;
+                  status = 'Microphone streaming to server';
+                });
+              } catch (e) {
+                setState(() => status = 'Microphone error: $e');
+              }
+            }
+
+            Future<void> stopMicrophone() async {
+              await microphoneSubscription?.cancel();
+              microphoneSubscription = null;
+              await recorder.stop();
+
+              setState(() {
+                microphoneRunning = false;
+                status = 'Microphone stopped';
+              });
+            }
+
+            Future<void> disconnect() async {
+              await stopMicrophoneIfRunning();
+              await socketSubscription?.cancel();
+              await socket?.sink.close();
+
+              setState(() {
+                connected = false;
+                status = 'Disconnected';
+              });
+            }
+
+            Future<void> stopMicrophoneIfRunning() async {
+              if (microphoneRunning) {
+                await stopMicrophone();
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(
+                  title: const Text(
+                    'AFRINODE AI LIVE BAND',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                body: SafeArea(
+                  child: ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      const Icon(
+                        Icons.graphic_eq,
+                        size: 76,
+                        color: Color(0xFFD4AF37),
+                      ),
+                      const SizedBox(height: 12),
+                      const Center(
+                        child: Text(
+                          'LIVE BAND CONTROL',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Card(
+                        child: ListTile(
+                          leading: Icon(
+                            synthReady ? Icons.check_circle : Icons.music_note,
+                            color: synthReady ? Colors.green : Colors.amber,
+                          ),
+                          title: const Text('Instrument synthesizer'),
+                          subtitle: Text(soundfontName),
+                          trailing: const Icon(Icons.library_music),
+                        ),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: busy ? null : loadSoundFont,
+                        icon: const Icon(Icons.folder_open),
+                        label: const Text('LOAD SOUNDFONT (.SF2)'),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        child: ListTile(
+                          leading: Icon(
+                            connected ? Icons.cloud_done : Icons.cloud_off,
+                            color: connected ? Colors.green : Colors.orange,
+                          ),
+                          title: const Text('AFRINODE VPS'),
+                          subtitle: const Text(serverUrl),
+                        ),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: connected ? disconnect : connectServer,
+                        icon: Icon(
+                          connected ? Icons.link_off : Icons.link,
+                        ),
+                        label: Text(
+                          connected ? 'DISCONNECT SERVER' : 'CONNECT SERVER',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: connected
+                            ? (microphoneRunning
+                                ? stopMicrophone
+                                : startMicrophone)
+                            : null,
+                        icon: Icon(
+                          microphoneRunning ? Icons.mic_off : Icons.mic,
+                        ),
+                        label: Text(
+                          microphoneRunning
+                              ? 'STOP MICROPHONE'
+                              : 'START LIVE INPUT',
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'SYSTEM STATUS',
+                                style: TextStyle(
+                                  color: Color(0xFFD4AF37),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(status),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'The server sends MIDI instructions. '
+                        'The Android synthesizer renders those instructions '
+                        'using the selected SoundFont.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+          EOF
+
+      - name: Configure Android microphone and network permissions
+        working-directory: afrinode_live_band
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          s = s.replace(
+              '<application',
+              '<uses-permission android:name="android.permission.INTERNET"/>'
+              '<uses-permission android:name="android.permission.RECORD_AUDIO"/>'
+              '<application android:usesCleartextTraffic="true"',
+              1
+          )
+
+          p.write_text(s)
+          PY
+
+      - name: Build release APK
+        working-directory: afrinode_live_band
+        env:
+          LIVE_BAND_TOKEN: ${{ secrets.LIVE_BAND_TOKEN }}
+        run: |
+          flutter pub get
+          flutter build apk --release \
+            --dart-define=SERVER_URL=ws://13.140.90.83:8765 \
+            --dart-define=SERVER_TOKEN="$LIVE_BAND_TOKEN"
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AFRINODE-AI-LIVE-BAND-APK
+          path: afrinode_live_band/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Prepare server files
+        run: |
           mkdir -p server
-          mkdir -p docs
-          mkdir -p .github/workflows
 
-      - name: Generate application configuration
-        run: |
-          cat > CMakeLists.txt <<'EOF'
-          cmake_minimum_required(VERSION 3.22)
-
-          project(AFRINODE_AI_LIVE_BAND VERSION 1.0.0)
-
-          set(CMAKE_CXX_STANDARD 17)
-          set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-          include(FetchContent)
-
-          FetchContent_Declare(
-              JUCE
-              GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-              GIT_TAG 8.0.6
-          )
-
-          FetchContent_MakeAvailable(JUCE)
-
-          juce_add_gui_app(AFRINODE_AI_LIVE_BAND
-              PRODUCT_NAME "AFRINODE AI LIVE BAND"
-              COMPANY_NAME "AFRINODE"
-              VERSION 1.0.0
-          )
-
-          juce_generate_juce_header(AFRINODE_AI_LIVE_BAND)
-
-          target_sources(AFRINODE_AI_LIVE_BAND PRIVATE
-              Source/Main.cpp
-              Source/MainComponent.cpp
-              Source/AudioEngine.cpp
-              Source/AudioStatistics.cpp
-          )
-
-          target_compile_definitions(AFRINODE_AI_LIVE_BAND PRIVATE
-              JUCE_WEB_BROWSER=0
-              JUCE_USE_CURL=0
-              JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:AFRINODE_AI_LIVE_BAND,JUCE_PRODUCT_NAME>"
-              JUCE_APPLICATION_VERSION_STRING="1.0.0"
-          )
-
-          target_link_libraries(AFRINODE_AI_LIVE_BAND PRIVATE
-              juce::juce_audio_utils
-              juce::juce_audio_devices
-              juce::juce_audio_basics
-              juce::juce_dsp
-              juce::juce_gui_extra
-              juce::juce_recommended_config_flags
-              juce::juce_recommended_lto_flags
-              juce::juce_recommended_warning_flags
-          )
-          EOF
-
-      - name: Generate application entry point
-        run: |
-          cat > Source/Main.cpp <<'EOF'
-          #include <JuceHeader.h>
-          #include "MainComponent.h"
-
-          class AFRINODEApplication : public juce::JUCEApplication
-          {
-          public:
-              const juce::String getApplicationName() override
-              {
-                  return "AFRINODE AI LIVE BAND";
-              }
-
-              const juce::String getApplicationVersion() override
-              {
-                  return "1.0.0";
-              }
-
-              void initialise(const juce::String&) override
-              {
-                  window = std::make_unique<MainWindow>(getApplicationName());
-              }
-
-              void shutdown() override
-              {
-                  window.reset();
-              }
-
-              class MainWindow : public juce::DocumentWindow
-              {
-              public:
-                  MainWindow(juce::String name)
-                      : DocumentWindow(name,
-                          juce::Colour(12, 18, 32),
-                          DocumentWindow::allButtons)
-                  {
-                      setUsingNativeTitleBar(true);
-                      setContentOwned(new MainComponent(), true);
-                      centreWithSize(1000, 700);
-                      setVisible(true);
-                  }
-
-                  void closeButtonPressed() override
-                  {
-                      juce::JUCEApplication::getInstance()->systemRequestedQuit();
-                  }
-              };
-
-          private:
-              std::unique_ptr<MainWindow> window;
-          };
-
-          START_JUCE_APPLICATION(AFRINODEApplication)
-          EOF
-
-      - name: Generate audio statistics engine
-        run: |
-          cat > Source/AudioStatistics.h <<'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-
-          class AudioStatistics
-          {
-          public:
-              void process(const juce::AudioBuffer<float>& buffer)
-              {
-                  if (buffer.getNumSamples() == 0)
-                      return;
-
-                  float peak = 0.0f;
-                  double total = 0.0;
-                  int crossings = 0;
-                  float previous = buffer.getSample(0, 0);
-
-                  for (int channel = 0;
-                       channel < buffer.getNumChannels(); ++channel)
-                  {
-                      const float* data = buffer.getReadPointer(channel);
-
-                      for (int i = 0; i < buffer.getNumSamples(); ++i)
-                      {
-                          const float sample = data[i];
-
-                          peak = juce::jmax(peak, std::abs(sample));
-                          total += static_cast<double>(sample) * sample;
-
-                          if ((sample >= 0.0f && previous < 0.0f) ||
-                              (sample < 0.0f && previous >= 0.0f))
-                              ++crossings;
-
-                          previous = sample;
-                      }
-                  }
-
-                  const double count =
-                      static_cast<double>(buffer.getNumSamples()) *
-                      buffer.getNumChannels();
-
-                  const float rms =
-                      static_cast<float>(std::sqrt(total / count));
-
-                  peakLevel.store(peak);
-                  rmsLevel.store(rms);
-                  zeroCrossings.store(crossings);
-                  processedSamples.fetch_add(buffer.getNumSamples());
-              }
-
-              float getPeak() const { return peakLevel.load(); }
-              float getRms() const { return rmsLevel.load(); }
-              int getZeroCrossings() const { return zeroCrossings.load(); }
-
-              juce::int64 getProcessedSamples() const
-              {
-                  return processedSamples.load();
-              }
-
-          private:
-              std::atomic<float> peakLevel{0.0f};
-              std::atomic<float> rmsLevel{0.0f};
-              std::atomic<int> zeroCrossings{0};
-              std::atomic<juce::int64> processedSamples{0};
-          };
-          EOF
-
-          cat > Source/AudioStatistics.cpp <<'EOF'
-          #include "AudioStatistics.h"
-          EOF
-
-      - name: Generate audio engine
-        run: |
-          cat > Source/AudioEngine.h <<'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-          #include "AudioStatistics.h"
-
-          class AudioEngine : public juce::AudioIODeviceCallback
-          {
-          public:
-              AudioEngine();
-              ~AudioEngine() override;
-
-              juce::String initialise();
-              void shutdown();
-
-              void audioDeviceIOCallbackWithContext(
-                  const float* const* inputChannelData,
-                  int numInputChannels,
-                  float* const* outputChannelData,
-                  int numOutputChannels,
-                  int numSamples,
-                  const juce::AudioIODeviceCallbackContext& context) override;
-
-              void audioDeviceAboutToStart(
-                  juce::AudioIODevice* device) override;
-
-              void audioDeviceStopped() override;
-
-              juce::AudioDeviceManager& getDeviceManager()
-              {
-                  return deviceManager;
-              }
-
-              AudioStatistics& getStatistics()
-              {
-                  return statistics;
-              }
-
-              void setMonitoring(bool enabled)
-              {
-                  monitoring.store(enabled);
-              }
-
-              bool isMonitoring() const
-              {
-                  return monitoring.load();
-              }
-
-          private:
-              juce::AudioDeviceManager deviceManager;
-              AudioStatistics statistics;
-              std::atomic<bool> monitoring{false};
-              std::atomic<double> sampleRate{44100.0};
-
-              JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioEngine)
-          };
-          EOF
-
-          cat > Source/AudioEngine.cpp <<'EOF'
-          #include "AudioEngine.h"
-
-          AudioEngine::AudioEngine()
-          {
-          }
-
-          AudioEngine::~AudioEngine()
-          {
-              shutdown();
-          }
-
-          juce::String AudioEngine::initialise()
-          {
-              auto result = deviceManager.initialiseWithDefaultDevices(2, 2);
-
-              if (result.isNotEmpty())
-                  return result;
-
-              deviceManager.addAudioCallback(this);
-              return {};
-          }
-
-          void AudioEngine::shutdown()
-          {
-              deviceManager.removeAudioCallback(this);
-              deviceManager.closeAudioDevice();
-          }
-
-          void AudioEngine::audioDeviceAboutToStart(
-              juce::AudioIODevice* device)
-          {
-              if (device != nullptr)
-                  sampleRate.store(device->getCurrentSampleRate());
-          }
-
-          void AudioEngine::audioDeviceStopped()
-          {
-          }
-
-          void AudioEngine::audioDeviceIOCallbackWithContext(
-              const float* const* inputChannelData,
-              int numInputChannels,
-              float* const* outputChannelData,
-              int numOutputChannels,
-              int numSamples,
-              const juce::AudioIODeviceCallbackContext&)
-          {
-              juce::AudioBuffer<float> input(
-                  const_cast<float**>(inputChannelData),
-                  numInputChannels,
-                  numSamples);
-
-              if (numInputChannels > 0)
-                  statistics.process(input);
-
-              for (int channel = 0; channel < numOutputChannels; ++channel)
-              {
-                  if (outputChannelData[channel] == nullptr)
-                      continue;
-
-                  juce::FloatVectorOperations::clear(
-                      outputChannelData[channel], numSamples);
-
-                  if (monitoring.load() &&
-                      numInputChannels > 0 &&
-                      inputChannelData[juce::jmin(
-                          channel, numInputChannels - 1)] != nullptr)
-                  {
-                      juce::FloatVectorOperations::copy(
-                          outputChannelData[channel],
-                          inputChannelData[juce::jmin(
-                              channel, numInputChannels - 1)],
-                          numSamples);
-                  }
-              }
-          }
-          EOF
-
-      - name: Generate main application interface
-        run: |
-          cat > Source/MainComponent.h <<'EOF'
-          #pragma once
-          #include <JuceHeader.h>
-          #include "AudioEngine.h"
-
-          class MainComponent : public juce::AudioAppComponent,
-                                private juce::Timer
-          {
-          public:
-              MainComponent();
-              ~MainComponent() override;
-
-              void prepareToPlay(int, double) override;
-              void getNextAudioBlock(
-                  const juce::AudioSourceChannelInfo&) override;
-              void releaseResources() override;
-              void paint(juce::Graphics&) override;
-              void resized() override;
-
-          private:
-              void timerCallback() override;
-              void refreshStatistics();
-
-              AudioEngine engine;
-
-              juce::Label heading;
-              juce::Label subtitle;
-              juce::Label inputLabel;
-              juce::Label outputLabel;
-              juce::Label statusLabel;
-              juce::Label peakLabel;
-              juce::Label rmsLabel;
-              juce::Label samplesLabel;
-
-              juce::TextButton deviceSettingsButton{"AUDIO DEVICE SETTINGS"};
-              juce::TextButton monitoringButton{"MIC MONITOR: OFF"};
-
-              JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
-          };
-          EOF
-
-          cat > Source/MainComponent.cpp <<'EOF'
-          #include "MainComponent.h"
-
-          MainComponent::MainComponent()
-          {
-              setSize(1000, 700);
-
-              heading.setText("AFRINODE", juce::dontSendNotification);
-              heading.setFont(juce::Font(38.0f, juce::Font::bold));
-              heading.setColour(juce::Label::textColourId,
-                                juce::Colour(212, 175, 55));
-              addAndMakeVisible(heading);
-
-              subtitle.setText("AI LIVE BAND | PROFESSIONAL AUDIO ENGINE",
-                               juce::dontSendNotification);
-              subtitle.setFont(juce::Font(17.0f));
-              subtitle.setColour(juce::Label::textColourId,
-                                 juce::Colours::white);
-              addAndMakeVisible(subtitle);
-
-              inputLabel.setText(
-                  "AUDIO INPUT: Microphone / USB audio interface",
-                  juce::dontSendNotification);
-              outputLabel.setText(
-                  "AUDIO OUTPUT: USB interface / mixer / speakers",
-                  juce::dontSendNotification);
-
-              statusLabel.setText("INITIALISING AUDIO...",
-                                  juce::dontSendNotification);
-
-              peakLabel.setText("Input peak: 0.000",
-                                juce::dontSendNotification);
-              rmsLabel.setText("Input RMS: 0.000",
-                               juce::dontSendNotification);
-              samplesLabel.setText("Processed samples: 0",
-                                   juce::dontSendNotification);
-
-              for (auto* component : {
-                  &inputLabel, &outputLabel, &statusLabel,
-                  &peakLabel, &rmsLabel, &samplesLabel
-              })
-              {
-                  component->setColour(
-                      juce::Label::textColourId, juce::Colours::white);
-                  addAndMakeVisible(*component);
-              }
-
-              deviceSettingsButton.onClick = [this]
-              {
-                  juce::DialogWindow::LaunchOptions options;
-                  options.content.setOwned(
-                      new juce::AudioDeviceSelectorComponent(
-                          engine.getDeviceManager(),
-                          0, 2, 0, 2, true, true, true, false));
-
-                  options.dialogTitle = "AFRINODE Audio Devices";
-                  options.dialogBackgroundColour =
-                      juce::Colour(20, 27, 43);
-                  options.escapeKeyTriggersCloseButton = true;
-                  options.useNativeTitleBar = true;
-                  options.resizable = true;
-                  options.launchAsync();
-              };
-
-              monitoringButton.onClick = [this]
-              {
-                  const bool enabled = !engine.isMonitoring();
-                  engine.setMonitoring(enabled);
-                  monitoringButton.setButtonText(
-                      enabled ? "MIC MONITOR: ON" : "MIC MONITOR: OFF");
-              };
-
-              addAndMakeVisible(deviceSettingsButton);
-              addAndMakeVisible(monitoringButton);
-
-              const auto error = engine.initialise();
-
-              statusLabel.setText(
-                  error.isEmpty()
-                      ? "AUDIO ENGINE READY"
-                      : "AUDIO DEVICE ERROR: " + error,
-                  juce::dontSendNotification);
-
-              startTimerHz(4);
-          }
-
-          MainComponent::~MainComponent()
-          {
-              stopTimer();
-              shutdownAudio();
-              engine.shutdown();
-          }
-
-          void MainComponent::prepareToPlay(int, double)
-          {
-          }
-
-          void MainComponent::getNextAudioBlock(
-              const juce::AudioSourceChannelInfo& info)
-          {
-              info.clearActiveBufferRegion();
-          }
-
-          void MainComponent::releaseResources()
-          {
-          }
-
-          void MainComponent::paint(juce::Graphics& g)
-          {
-              g.fillAll(juce::Colour(12, 18, 32));
-
-              g.setColour(juce::Colour(212, 175, 55));
-              g.drawRoundedRectangle(
-                  getLocalBounds().toFloat().reduced(15),
-                  15.0f, 2.0f);
-
-              g.setColour(juce::Colour(28, 38, 58));
-              g.fillRoundedRectangle(
-                  30.0f, 190.0f,
-                  getWidth() - 60.0f, 390.0f, 15.0f);
-
-              g.setColour(juce::Colour(212, 175, 55));
-              g.setFont(20.0f);
-              g.drawText("LIVE PERFORMANCE STATISTICS",
-                         55, 210, getWidth() - 110, 35,
-                         juce::Justification::left);
-          }
-
-          void MainComponent::resized()
-          {
-              heading.setBounds(45, 25, 500, 55);
-              subtitle.setBounds(48, 82, 700, 30);
-
-              inputLabel.setBounds(55, 260, 800, 35);
-              outputLabel.setBounds(55, 305, 800, 35);
-              statusLabel.setBounds(55, 355, 850, 35);
-
-              peakLabel.setBounds(55, 430, 400, 30);
-              rmsLabel.setBounds(55, 470, 400, 30);
-              samplesLabel.setBounds(55, 510, 500, 30);
-
-              deviceSettingsButton.setBounds(55, 610, 240, 42);
-              monitoringButton.setBounds(315, 610, 220, 42);
-          }
-
-          void MainComponent::timerCallback()
-          {
-              refreshStatistics();
-          }
-
-          void MainComponent::refreshStatistics()
-          {
-              const auto& stats = engine.getStatistics();
-
-              peakLabel.setText(
-                  "Input peak: " +
-                  juce::String(stats.getPeak(), 3),
-                  juce::dontSendNotification);
-
-              rmsLabel.setText(
-                  "Input RMS: " +
-                  juce::String(stats.getRms(), 3),
-                  juce::dontSendNotification);
-
-              samplesLabel.setText(
-                  "Processed samples: " +
-                  juce::String(stats.getProcessedSamples()),
-                  juce::dontSendNotification);
-          }
-          EOF
-
-      - name: Generate AFRINODE application icon
-        run: |
-          cat > Assets/afrinode-icon.svg <<'EOF'
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-            <rect width="512" height="512" rx="100" fill="#0C1220"/>
-            <circle cx="256" cy="256" r="190"
-                    fill="none" stroke="#D4AF37" stroke-width="15"/>
-            <path d="M135 350 L256 110 L377 350"
-                  fill="none" stroke="#D4AF37"
-                  stroke-width="32" stroke-linecap="round"
-                  stroke-linejoin="round"/>
-            <path d="M190 280 H322"
-                  stroke="#FFFFFF" stroke-width="22"
-                  stroke-linecap="round"/>
-            <path d="M215 400 V345 M256 400 V345 M297 400 V345"
-                  stroke="#D4AF37" stroke-width="14"
-                  stroke-linecap="round"/>
-            <circle cx="256" cy="256" r="22" fill="#FFFFFF"/>
-          </svg>
-          EOF
-
-      - name: Generate project documentation
-        run: |
-          cat > README.md <<'EOF'
-          # AFRINODE AI LIVE BAND
-
-          AFRINODE AI LIVE BAND is a live musical accompaniment platform
-          designed for churches, singers and live worship teams.
-
-          ## Architecture
-
-          - Local audio engine
-          - Microphone and audio-device input
-          - USB audio interface support through the operating system
-          - Audio-device selection
-          - Live input statistics
-          - Cloud AI bandleader integration (next development phase)
-          - Local instrument synthesis and arrangement engine (next phase)
-
-          ## Audio connections
-
-          The application uses the audio devices exposed by the operating
-          system. Compatible USB-C interfaces, USB sound cards, analogue
-          adapters and external mixers can be selected in Audio Device Settings.
-
-          Hardware compatibility depends on the phone, adapter, interface,
-          drivers and operating system.
-
-          ## Important
-
-          Microphone monitoring can cause feedback or echo when speakers
-          are close to the microphone. Use headphones or a properly
-          configured mixer when testing.
-
-          This generated foundation is not yet the finished AI band.
-          Cloud intelligence, multi-instrument arrangements, MIDI scheduling,
-          pitch and chord analysis, and the complete Android release
-          are subsequent implementation tasks.
-          EOF
-
-          cat > docs/ARCHITECTURE.md <<'EOF'
-          # AFRINODE AI LIVE BAND - Architecture
-
-          ## Local audio engine
-
-          Responsible for:
-          - Audio input and output
-          - Device selection
-          - Audio statistics
-          - Low-latency playback
-          - MIDI scheduling
-          - Instrument synthesis
-          - Offline fallback
-
-          ## Cloud bandleader
-
-          Responsible for:
-          - Musical context analysis
-          - Arrangement decisions
-          - Instrument selection
-          - Musical section suggestions
-          - Instrument entry and exit decisions
-          - Intensity and transition instructions
-
-          ## Musical roles
-
-          - Drums and percussion
-          - Bass
-          - Piano
-          - Guitar
-          - Organ
-          - Strings
-          - Brass
-          - Lead instruments
-
-          ## Performance requirements
-
-          Audio callbacks must not perform network requests, block on locks,
-          allocate memory unnecessarily or wait for cloud responses.
-
-          Cloud arrangement instructions must be scheduled ahead of playback.
-          The local engine must continue safely if the connection is lost.
-          EOF
-
-          cat > server/README.md <<'EOF'
-          # AFRINODE Cloud Bandleader
-
-          The cloud server will be implemented in the next development phase.
-
-          Planned responsibilities:
-          - Authenticated client sessions
-          - Secure WebSocket communication
-          - Musical context and arrangement decisions
-          - Instrument configuration
-          - Bar-aligned arrangement commands
-          - Heartbeats and reconnection
-          - Session statistics
-          - Offline-client recovery
-          EOF
-
-          cat > Tests/README.md <<'EOF'
-          # Test plan
-
-          Required tests:
-          - Audio input and output device initialisation
-          - USB interface connection and disconnection
-          - Input level statistics
-          - Audio callback stability
-          - MIDI note-on and note-off correctness
-          - Instrument changes
-          - Arrangement timing
-          - Cloud disconnection recovery
-          - Android microphone permission
-          - Long-duration playback
-          EOF
-
-      - name: Configure Linux build
-        run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build application
-        run: |
-          cmake --build build --config Release --parallel 2
-
-      - name: Upload generated source project
-        uses: actions/upload-artifact@v4
+          cat > server/server.py <<'PY'
+          import asyncio
+          import json
+          import os
+          import websockets
+
+          TOKEN = os.environ["LIVE_BAND_TOKEN"]
+
+          async def send_test_sequence(ws):
+              await ws.send(json.dumps({
+                  "type": "status",
+                  "message": "Authenticated. MIDI connection test running."
+              }))
+
+              # This is a connection and soundfont playback test,
+              # NOT the finished AI arrangement engine.
+              notes = [60, 64, 67, 72]
+
+              while True:
+                  for note in notes:
+                      await ws.send(json.dumps({
+                          "type": "note_on",
+                          "channel": 0,
+                          "note": note,
+                          "velocity": 75
+                      }))
+                      await asyncio.sleep(0.45)
+
+                      await ws.send(json.dumps({
+                          "type": "note_off",
+                          "channel": 0,
+                          "note": note
+                      }))
+                      await asyncio.sleep(0.10)
+
+          async def handler(ws):
+              try:
+                  first = await asyncio.wait_for(ws.recv(), timeout=10)
+
+                  if not isinstance(first, str):
+                      await ws.close(code=1008, reason="Authentication required")
+                      return
+
+                  auth = json.loads(first)
+
+                  if auth.get("type") != "auth" or auth.get("token") != TOKEN:
+                      await ws.close(code=1008, reason="Invalid token")
+                      return
+
+                  sender = asyncio.create_task(send_test_sequence(ws))
+
+                  try:
+                      async for message in ws:
+                          if isinstance(message, bytes):
+                              # Incoming 16 kHz mono PCM from the Android app.
+                              # The production analysis pipeline will process it.
+                              continue
+
+                          try:
+                              data = json.loads(message)
+                              print("CLIENT:", data, flush=True)
+                          except Exception:
+                              pass
+                  finally:
+                      sender.cancel()
+
+              except Exception as exc:
+                  print("CONNECTION ERROR:", exc, flush=True)
+
+          async def main():
+              print("AFRINODE LIVE BAND SERVER STARTING", flush=True)
+
+              async with websockets.serve(
+                  handler,
+                  "0.0.0.0",
+                  8765,
+                  max_size=2**20,
+                  ping_interval=20,
+                  ping_timeout=20
+              ):
+                  print("Listening on port 8765", flush=True)
+                  await asyncio.Future()
+
+          if __name__ == "__main__":
+              asyncio.run(main())
+          PY
+
+      - name: Create VPS deployment directory
+        uses: appleboy/ssh-action@v1.2.0
         with:
-          name: AFRINODE-AI-LIVE-BAND-SOURCE
-          path: |
-            CMakeLists.txt
-            Source/
-            Assets/
-            Tests/
-            server/
-            docs/
-            README.md
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            mkdir -p /opt/afrinode-live-band
 
-      - name: Upload Linux application
-        uses: actions/upload-artifact@v4
+      - name: Copy server to VPS
+        uses: appleboy/scp-action@v0.1.7
         with:
-          name: AFRINODE-AI-LIVE-BAND-LINUX
-          path: build/AFRINODE_AI_LIVE_BAND_artefacts/Release/
-          if-no-files-found: warn
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "server/server.py"
+          target: "/opt/afrinode-live-band"
+          strip_components: 1
 
-      - name: Commit generated project files
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Install and start AFRINODE server
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          LIVE_BAND_TOKEN: ${{ secrets.LIVE_BAND_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: LIVE_BAND_TOKEN
+          script: |
+            set -e
 
-          git add CMakeLists.txt Source Assets Tests server docs README.md
+            cd /opt/afrinode-live-band
 
-          if ! git diff --cached --quiet; then
-            git commit -m "Generate AFRINODE AI LIVE BAND application foundation"
-            git push
-          else
-            echo "No generated file changes to commit."
-          fi
+            apt-get update
+            apt-get install -y python3 python3-venv
+
+            python3 -m venv venv
+            venv/bin/pip install --upgrade pip
+            venv/bin/pip install "websockets>=14,<16"
+
+            printf 'LIVE_BAND_TOKEN=%s\n' "$LIVE_BAND_TOKEN" > .env
+            chmod 600 .env
+
+            cat > /etc/systemd/system/afrinode-live-band.service <<'EOF'
+            [Unit]
+            Description=AFRINODE AI Live Band Server
+            After=network.target
+
+            [Service]
+            Type=simple
+            WorkingDirectory=/opt/afrinode-live-band
+            EnvironmentFile=/opt/afrinode-live-band/.env
+            ExecStart=/opt/afrinode-live-band/venv/bin/python /opt/afrinode-live-band/server.py
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            systemctl daemon-reload
+            systemctl enable afrinode-live-band
+            systemctl restart afrinode-live-band
+            systemctl --no-pager --full status afrinode-live-band
