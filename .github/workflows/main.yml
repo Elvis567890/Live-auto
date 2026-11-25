@@ -1,3 +1,4 @@
+====================================
 name: Build AI Live Band App
 
 on:
@@ -66,22 +67,27 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # FIX 1: Link native juce_networking target, add FreeType for Android
+          # FIX: Suppress TSF_NULL warning that is treated as error by JUCE strict flags
+          if(NOT MSVC)
+            target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant)
+          endif()
+
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce_networking
+            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
-          # FIX 2: Resolve Android FreeType header inclusion for juce_graphics
+          # FIX: Resolve Android FreeType header inclusion for juce_graphics
           if(ANDROID)
             find_package(Freetype REQUIRED)
+            target_include_directories(AILiveBand PRIVATE ${FREETYPE_INCLUDE_DIRS})
             target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
           endif()
           EOF
