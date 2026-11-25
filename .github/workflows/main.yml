@@ -32,6 +32,7 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+          # Include cloned JUCE
           add_subdirectory(JUCE)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -65,7 +66,7 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # FIX 1: Use juce_networking (no juce:: prefix)
+          # FIX 1: Link native juce_networking target, add FreeType for Android
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
@@ -77,6 +78,12 @@ jobs:
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
+
+          # FIX 2: Resolve Android FreeType header inclusion for juce_graphics
+          if(ANDROID)
+            find_package(Freetype REQUIRED)
+            target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
+          endif()
           EOF
 
           # --- C++ Source Files ---
@@ -648,7 +655,6 @@ jobs:
       
       - name: Configure for Android
         run: |
-          # FIX 2: Add -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake -B build-android -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_HOME/ndk/26.3.11579264/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
