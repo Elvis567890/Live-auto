@@ -47,7 +47,6 @@ jobs:
 
           juce_generate_juce_header(AILiveBand)
 
-          # 修复：使用 ${CMAKE_CURRENT_SOURCE_DIR} 明确绝对路径
           target_sources(AILiveBand PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/Main.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/MainComponent.cpp
@@ -77,21 +76,23 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking
+            juce_networking                # 修复：使用无前缀的 juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
-          # 修复：针对 Android 工具链显式追加系统 FreeType 前缀路径
           if(ANDROID)
-            list(APPEND CMAKE_PREFIX_PATH "/usr")
+            # 修复：显式指定 FreeType 头文件和库路径
+            set(FREETYPE_INCLUDE_DIRS "/usr/include/freetype2")
+            set(FREETYPE_LIBRARY "/usr/lib/x86_64-linux-gnu/libfreetype.so")
             find_package(Freetype REQUIRED)
             target_include_directories(AILiveBand PRIVATE ${FREETYPE_INCLUDE_DIRS})
             target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
           endif()
           EOF
 
+          # --- 以下为完整的 C++ 源文件，内容与之前版本一致 ---
           # 2. Source/PitchDetector.h
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
