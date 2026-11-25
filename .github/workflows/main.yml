@@ -88,12 +88,11 @@ jobs:
           endif()
 
           if(ANDROID)
-            set(FREETYPE_INCLUDE_DIRS "/usr/include/freetype2")
-            set(FREETYPE_LIBRARY "/usr/lib/x86_64-linux-gnu/libfreetype.so")
-            find_package(Freetype REQUIRED)
-            target_include_directories(AILiveBand PRIVATE ${FREETYPE_INCLUDE_DIRS})
+            # Only add include directories for FreeType, DO NOT link the host library
+            target_include_directories(AILiveBand PRIVATE "/usr/include/freetype2")
             target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
 
+            # Allow undefined symbols for shared libraries on Android
             set_target_properties(AILiveBand PROPERTIES
                 LINK_FLAGS "-Wl,--allow-shlib-undefined"
             )
