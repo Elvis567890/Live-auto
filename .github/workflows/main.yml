@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────
-  # 1. SCAFFOLD — creates every C++ file and Projucer project
+  # 1. SCAFFOLD
   # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
@@ -47,7 +47,7 @@ jobs:
             COMPANY_NAME "AILiveBand"
             VERSION "0.1.0"
             MICROPHONE_PERMISSION_ENABLED TRUE
-            MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access to listen to your singing."
+            MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access."
           )
 
           juce_generate_juce_header(AILiveBand)
@@ -67,6 +67,8 @@ jobs:
             JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
+            AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
+            JUCE_DEBUG=1
           )
 
           target_link_libraries(AILiveBand PRIVATE
@@ -75,6 +77,7 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
+            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
@@ -114,6 +117,7 @@ jobs:
               <MODULE id="juce_graphics" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_gui_basics" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
+              <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
@@ -133,7 +137,7 @@ jobs:
           class PitchDetector {
           public:
               explicit PitchDetector(double sampleRate);
-              float detect(const float* samples, int numSamples);
+              float detect(const float* samples, int numSamples, float& outConfidence);
               static juce::String freqToNote(float freq);
               static int freqToMidi(float freq);
           private:
@@ -143,7 +147,8 @@ jobs:
           cat > Source/PitchDetector.cpp << 'EOF'
           #include "PitchDetector.h"
           PitchDetector::PitchDetector(double sampleRate) : sr(sampleRate) {}
-          float PitchDetector::detect(const float* samples, int numSamples) {
+          float PitchDetector::detect(const float* samples, int numSamples, float& outConfidence) {
+              outConfidence = 0.0f;
               if (numSamples < 64) return 0.0f;
               float mean = 0.0f;
               for (int i = 0; i < numSamples; ++i) mean += samples[i];
@@ -160,7 +165,9 @@ jobs:
                   for (int i = 0; i < numSamples - lag; ++i) corr += (samples[i] - mean) * (samples[i + lag] - mean);
                   if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
               }
-              if (bestLag == 0 || bestCorr < 0.2f * energy) return 0.0f;
+              float confidence = bestCorr / energy;
+              outConfidence = confidence;
+              if (bestLag == 0 || confidence < 0.2f) return 0.0f;
               return (float)(sr / (double)bestLag);
           }
           juce::String PitchDetector::freqToNote(float freq) {
@@ -272,21 +279,32 @@ jobs:
 
           void SoundFontSynth::initialize(double sampleRate) {
               if (synth) { tsf_close(synth); synth = nullptr; }
-              if (BinaryData::SoundFont_sf2Size == 0) return; 
+              if (BinaryData::SoundFont_sf2Size == 0) {
+                  DBG("[Synth] ERROR: SoundFont is empty!");
+                  return;
+              }
               try {
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      // Set defaults: Piano, Bass, Strings, Drums
-                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Ch 0: Acoustic Grand Piano
-                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Ch 1: Acoustic Bass
-                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Ch 2: String Ensemble
-                      tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Ch 9: Drums
+                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Piano
+                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Bass
+                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Strings
+                      tsf_channel_set_presetnumber(synth, 3, 56, 0); // Trumpet
+                      tsf_channel_set_presetnumber(synth, 4, 27, 0); // Guitar
+                      tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Drums
+                      DBG("[Synth] Initialized successfully at " + juce::String(sampleRate) + " Hz");
+                  } else {
+                      DBG("[Synth] Failed to load memory");
                   }
-              } catch (...) { synth = nullptr; }
+              } catch (...) { 
+                  synth = nullptr; 
+                  DBG("[Synth] Exception loading SoundFont");
+              }
           }
 
           void SoundFontSynth::noteOn(int channel, int midiNote, float velocity) {
+              DBG("[Synth] NoteOn ch=" + juce::String(channel) + " note=" + juce::String(midiNote) + " vel=" + juce::String(velocity));
               if (synth) tsf_channel_note_on(synth, channel, midiNote, velocity);
           }
 
@@ -313,96 +331,182 @@ jobs:
           }
           EOF
 
-          # The "Thinking" Arranger
+          # Arranger (Reads new 'events' format from Python server)
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
           #include "ChordInference.h"
           #include "SoundFontSynth.h"
 
-          class Arranger : public juce::Timer {
+          class Arranger : public juce::Timer
+          {
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
+              ~Arranger() override;
+
               void start();
               void stop();
-              void updateEnergy(float energy); // Called from audio thread
+
+              void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
+              bool isConnected() const { return connected.load(); }
+
           private:
               void timerCallback() override;
+              void handleMessage(const juce::String& message);
+              void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
+              void handleEvent(const juce::var& event);
+
               ChordInference& chordEngine;
               SoundFontSynth& synth;
-              int beatCounter = 0;
-              std::atomic<float> currentEnergy { 0.0f };
+
+              struct PendingNote { int channel, pitch; int64 triggerMs; };
+              std::vector<PendingNote> pendingNotes;
+
+              std::unique_ptr<juce::WebSocket> socket;
+              std::atomic<bool> connected { false };
+              juce::String aiResponse;
+              juce::CriticalSection responseLock;
+
+              JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
           };
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
-          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
-          
-          void Arranger::start() { beatCounter = 0; startTimer(500); }
-          void Arranger::stop() { stopTimer(); }
-          
-          void Arranger::updateEnergy(float energy) { currentEnergy.store(energy); }
 
-          void Arranger::timerCallback() {
-              int root = chordEngine.getRootNote();
-              auto notes = chordEngine.getChordNotes();
-              float energy = currentEnergy.load();
+          #ifndef AI_LIVE_BAND_SERVER_URL
+          #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
+          #endif
 
-              // A real band doesn't play everything all the time. 
-              // We use a 16-beat loop and the singer's energy to decide what to play.
+          static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
 
-              bool shouldPlayPiano = false;
-              bool shouldPlayBass = false;
-              bool shouldPlayStrings = false;
-              bool shouldPlayDrums = false;
+          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s)
+              : chordEngine(ci), synth(s) {}
 
-              // 1. The "Brain" logic based on energy
-              if (energy > 0.1f) {
-                  // High energy: Full band!
-                  shouldPlayDrums = true;
-                  shouldPlayBass = true;
-                  shouldPlayPiano = (beatCounter % 4 == 0); // Stab on beat 1
-              } 
-              else if (energy > 0.02f) {
-                  // Medium energy: Groove (Bass + Drums)
-                  shouldPlayDrums = true;
-                  shouldPlayBass = true;
-                  shouldPlayPiano = (beatCounter % 8 == 0); // Piano every 2 bars
-              } 
-              else {
-                  // Low energy / quiet singing: Ambient (Strings + Bass)
-                  shouldPlayStrings = (beatCounter % 4 == 0);
-                  shouldPlayBass = (beatCounter % 4 == 0 || beatCounter % 4 == 2);
-                  shouldPlayDrums = false;
-                  shouldPlayPiano = false;
+          Arranger::~Arranger() { stop(); }
+
+          void Arranger::start()
+          {
+              DBG("[Arranger] Attempting to connect to " + SERVER_URL);
+              juce::URL url(SERVER_URL);
+              socket = url.createWebSocket();
+              if (socket == nullptr) {
+                  DBG("[Arranger] Failed to create WebSocket from URL");
+                  return;
               }
 
-              // 2. Dynamic Drops (Like a real band, dropping out for a bar)
-              if (beatCounter >= 12 && beatCounter < 16) {
-                  // The "Breakdown" every 4th bar. 
-                  shouldPlayDrums = false;
-                  shouldPlayPiano = false;
-                  shouldPlayStrings = true;
+              socket->setConnectCallback([this]() {
+                  connected.store(true);
+                  DBG("[Arranger] Connected to server");
+              });
+
+              socket->setCloseCallback([this](int code, const juce::String& reason) {
+                  connected.store(false);
+                  DBG("[Arranger] Disconnected. Code: " + juce::String(code) + " Reason: " + reason);
+              });
+
+              socket->setErrorCallback([this](const juce::String& err) {
+                  connected.store(false);
+                  DBG("[Arranger] WS error: " + err);
+              });
+
+              socket->setMessageCallback([this](const juce::String& msg) {
+                  DBG("[Arranger] Received: " + msg);
+                  handleMessage(msg);
+              });
+
+              startTimerHz(30);
+          }
+
+          void Arranger::stop()
+          {
+              stopTimer();
+              if (socket != nullptr) {
+                  socket->close();
+                  socket.reset();
+              }
+              connected.store(false);
+          }
+
+          void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord)
+          {
+              if (!connected.load() || socket == nullptr) return;
+
+              juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+              obj->setProperty("pitch", midiNote);
+              obj->setProperty("energy", energy);
+              obj->setProperty("pitch_speed", pitchSpeed);
+              obj->setProperty("chord", chord);
+
+              juce::String json = juce::JSON::toString(juce::var(obj.get()));
+              socket->sendTextMessage(json);
+          }
+
+          void Arranger::handleMessage(const juce::String& message)
+          {
+              const juce::ScopedLock sl(responseLock);
+              aiResponse = message;
+          }
+
+          void Arranger::timerCallback()
+          {
+              juce::String msg;
+              {
+                  const juce::ScopedLock sl(responseLock);
+                  msg = aiResponse;
+                  if (msg.isEmpty()) return;
+                  aiResponse.clear();
               }
 
-              // 3. Trigger the instruments
-              if (shouldPlayBass) synth.noteOn(1, root, 0.8f);
-              
-              if (shouldPlayPiano && !notes.empty()) {
-                  for (int note : notes) synth.noteOn(0, note, 0.6f);
+              juce::var parsed = juce::JSON::parse(msg);
+              if (auto* root = parsed.getDynamicObject()) {
+                  if (auto* events = root->getProperty("events").getArray()) {
+                      for (auto& ev : *events) handleEvent(ev);
+                  }
               }
 
-              if (shouldPlayStrings && !notes.empty()) {
-                  for (int note : notes) synth.noteOn(2, note + 12, 0.5f); // Strings play an octave higher
+              const int64 now = juce::Time::currentTimeMillis();
+              for (auto it = pendingNotes.begin(); it != pendingNotes.end(); ) {
+                  if (now >= it->triggerMs) {
+                      synth.noteOn(it->channel, it->pitch, 0.8f);
+                      it = pendingNotes.erase(it);
+                  } else ++it;
               }
+          }
 
-              if (shouldPlayDrums) {
-                  int drumNote = (beatCounter % 4 == 0 || beatCounter % 4 == 2) ? 36 : 38; // Kick/Snare
-                  synth.noteOn(9, drumNote, 1.0f);
+          void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs)
+          {
+              juce::ignoreUnused(velocity);
+              const int64 trigger = juce::Time::currentTimeMillis() + (int64)timeOffsetMs;
+              pendingNotes.push_back({ channel, pitch, trigger });
+
+              juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] {
+                  synth.noteOff(channel, pitch);
+              });
+          }
+
+          void Arranger::handleEvent(const juce::var& event)
+          {
+              auto* obj = event.getDynamicObject();
+              if (obj == nullptr) return;
+
+              juce::String type = obj->getProperty("type").toString();
+              double timeOffset = (double)obj->getProperty("time");
+
+              DBG("[Arranger] Event type: " + type + " time: " + juce::String(timeOffset));
+
+              if (type == "note") {
+                  int pitch    = (int)obj->getProperty("pitch");
+                  int velocity = obj->hasProperty("velocity") ? (int)obj->getProperty("velocity") : 100;
+                  int duration = obj->hasProperty("duration") ? (int)obj->getProperty("duration") : 400;
+                  int channel  = obj->hasProperty("channel")  ? (int)obj->getProperty("channel")  : 0;
+                  DBG("  -> Scheduling Note: ch=" + juce::String(channel) + " pitch=" + juce::String(pitch) + " dur=" + juce::String(duration));
+                  scheduleNote(channel, pitch, velocity, duration, timeOffset);
+              } else if (type == "program") {
+                  int channel = (int)obj->getProperty("channel");
+                  int program = (int)obj->getProperty("program");
+                  DBG("  -> Program Change: ch=" + juce::String(channel) + " prog=" + juce::String(program));
+                  synth.setInstrument(channel, program);
               }
-
-              beatCounter++;
-              if (beatCounter >= 16) beatCounter = 0; // 16-beat loop
           }
           EOF
 
@@ -427,17 +531,26 @@ jobs:
               void timerCallback() override;
               void startAudio();
               void stopAudio();
+              void showAudioSettings();
 
               juce::AudioDeviceManager deviceManager;
               std::unique_ptr<PitchDetector> pitchDetector;
               ChordInference chordInference;
               SoundFontSynth synth;
               std::unique_ptr<Arranger> arranger;
+              std::unique_ptr<juce::AudioDeviceSelectorComponent> deviceSelector;
 
-              juce::Label noteLabel, chordLabel, statusLabel;
+              juce::Label noteLabel, chordLabel, stateLabel;
               juce::TextButton startButton { "Start" };
+              juce::TextButton testButton { "Test AI" }; // NEW: Test AI button
+              juce::TextButton settingsButton { "Settings" };
 
               std::atomic<float> currentFreq { 0.0f };
+              std::atomic<float> currentConfidence { 0.0f };
+              std::atomic<float> currentEnergy { 0.0f };
+              std::atomic<float> pitchSpeed { 0.0f };
+              
+              float lastPitch = 0.0f;
 
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
           };
@@ -446,52 +559,92 @@ jobs:
           #include "MainComponent.h"
 
           MainComponent::MainComponent() {
-              addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(statusLabel);
-              addAndMakeVisible(startButton);
+              addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(stateLabel);
+              addAndMakeVisible(startButton); addAndMakeVisible(testButton); addAndMakeVisible(settingsButton);
 
-              noteLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
-              chordLabel.setFont(juce::Font(juce::FontOptions(32.0f)));
-              statusLabel.setFont(juce::Font(juce::FontOptions(16.0f)));
+              stateLabel.setFont(juce::Font(juce::FontOptions(28.0f, juce::Font::bold)));
+              noteLabel.setFont(juce::Font(juce::FontOptions(48.0f, juce::Font::bold)));
+              chordLabel.setFont(juce::Font(juce::FontOptions(36.0f)));
               
               noteLabel.setJustificationType(juce::Justification::centred);
               chordLabel.setJustificationType(juce::Justification::centred);
-              statusLabel.setJustificationType(juce::Justification::centred);
+              stateLabel.setJustificationType(juce::Justification::centred);
+              
               noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-              chordLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
-              statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+              chordLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(0, 255, 200));
+              stateLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
+
+              startButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(0, 100, 80));
+              testButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(100, 80, 0));
+              settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 40, 40));
 
               startButton.onClick = [this] {
                   if (deviceManager.getCurrentAudioDevice() == nullptr) {
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
                           juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) {
                               if (granted) startAudio();
-                              else statusLabel.setText("Microphone permission denied", juce::dontSendNotification);
+                              else stateLabel.setText("MIC DENIED", juce::dontSendNotification);
                           });
                       } else { startAudio(); }
                   } else { 
                       stopAudio(); 
-                      statusLabel.setText("Audio: stopped", juce::dontSendNotification);
+                      stateLabel.setText("OFFLINE", juce::dontSendNotification);
                       startButton.setButtonText("Start");
                   }
               };
 
+              // NEW: Test AI Button logic
+              testButton.onClick = [this] {
+                  if (!arranger || !arranger->isConnected()) {
+                      DBG("[Main] Test AI clicked, but not connected.");
+                      return;
+                  }
+                  DBG("[Main] Sending 8 test notes to AI...");
+                  juce::Timer::callAfterDelay(0, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(200, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(400, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(600, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(800, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1000, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1200, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1400, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
+              };
+
+              settingsButton.onClick = [this] { showAudioSettings(); };
+
               setSize(700, 600);
-              startTimerHz(20);
+              startTimerHz(60);
           }
 
           MainComponent::~MainComponent() { stopTimer(); stopAudio(); }
+
+          void MainComponent::showAudioSettings() {
+              if (!deviceSelector) {
+                  deviceSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(
+                      deviceManager, 1, 2, 2, 2, false, false, true, false);
+                  deviceSelector->setSize(500, 400);
+                  juce::DialogWindow::LaunchOptions options;
+                  options.content.setNonOwned(deviceSelector.get());
+                  options.dialogTitle = "Audio Routing (Mic & Speaker)";
+                  options.dialogBackgroundColour = juce::Colours::darkgrey;
+                  options.escapeKeyTriggersCloseButton = true;
+                  options.useNativeTitleBar = true;
+                  options.resizable = false;
+                  options.launchAsync();
+              }
+          }
 
           void MainComponent::startAudio() {
               if (deviceManager.getCurrentAudioDevice() != nullptr) return;
               arranger = std::make_unique<Arranger>(chordInference, synth);
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
               if (err.isNotEmpty()) {
-                  statusLabel.setText("Audio Error: " + err, juce::dontSendNotification);
+                  stateLabel.setText("AUDIO ERROR", juce::dontSendNotification);
                   arranger.reset();
                   return;
               }
               deviceManager.addAudioCallback(this);
-              statusLabel.setText("Audio: running", juce::dontSendNotification);
+              stateLabel.setText("WAITING FOR AI...", juce::dontSendNotification);
               startButton.setButtonText("Stop");
               if (arranger) arranger->start();
           }
@@ -504,16 +657,33 @@ jobs:
               }
           }
 
-          void MainComponent::paint(juce::Graphics& g) { g.fillAll(juce::Colour::fromRGB(20, 20, 30)); }
+          void MainComponent::paint(juce::Graphics& g) {
+              g.fillAll(juce::Colour::fromRGB(10, 12, 18));
+              
+              auto center = getLocalBounds().getCentre();
+              float radius = 100.0f + (currentEnergy.load() * 200.0f);
+              
+              juce::ColourGradient grad(
+                  juce::Colour::fromRGB(0, 255, 200).withAlpha(0.2f), (float)center.x, (float)center.y,
+                  juce::Colour::fromRGB(0, 0, 0).withAlpha(0.0f), (float)center.x + radius, (float)center.y, true);
+              
+              g.setGradientFill(grad);
+              g.fillEllipse((float)center.x - radius, (float)center.y - radius, radius * 2, radius * 2);
+          }
 
           void MainComponent::resized() {
-              auto area = getLocalBounds().reduced(20);
-              int blockHeight = area.getHeight() / 4;
-
-              noteLabel.setBounds(area.removeFromTop(blockHeight));
-              chordLabel.setBounds(area.removeFromTop(blockHeight));
-              statusLabel.setBounds(area.removeFromTop(blockHeight));
-              startButton.setBounds(area.removeFromTop(blockHeight).withSizeKeepingCentre(200, 60));
+              auto area = getLocalBounds().reduced(40);
+              
+              stateLabel.setBounds(area.removeFromTop(60));
+              area.removeFromTop(40);
+              noteLabel.setBounds(area.removeFromTop(100));
+              chordLabel.setBounds(area.removeFromTop(60));
+              
+              area.removeFromBottom(80);
+              auto buttonArea = area.removeFromBottom(60);
+              startButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 3).reduced(10));
+              testButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 2).reduced(10));
+              settingsButton.setBounds(buttonArea.reduced(10));
           }
 
           void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device) {
@@ -525,17 +695,26 @@ jobs:
 
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
-                  // Calculate energy (volume) of the input
                   float rms = 0.0f;
                   for (int i = 0; i < numSamples; ++i) rms += inputChannelData[0][i] * inputChannelData[0][i];
                   rms = std::sqrt(rms / numSamples);
                   
-                  if (arranger) arranger->updateEnergy(rms);
+                  float confidence = 0.0f;
+                  float freq = pitchDetector->detect(inputChannelData[0], numSamples, confidence);
+                  
+                  currentConfidence.store(confidence);
+                  currentEnergy.store(rms);
 
-                  float freq = pitchDetector->detect(inputChannelData[0], numSamples);
-                  if (freq > 0.0f) {
+                  if (freq > 0.0f && confidence > 0.4f) {
                       currentFreq.store(freq);
+                      float diff = std::abs(freq - lastPitch);
+                      pitchSpeed.store(diff / 100.0f); 
+                      lastPitch = freq;
                       chordInference.addNote(PitchDetector::freqToMidi(freq));
+                  }
+
+                  if (arranger) {
+                      arranger->sendToServer(PitchDetector::freqToMidi(freq), rms, pitchSpeed.load(), chordInference.getChord());
                   }
               }
               if (numOutputChannels >= 2) {
@@ -545,8 +724,32 @@ jobs:
 
           void MainComponent::timerCallback() {
               float f = currentFreq.load();
-              if (f > 0.0f) noteLabel.setText("Note: " + PitchDetector::freqToNote(f) + "\n(" + juce::String(f, 1) + " Hz)", juce::dontSendNotification);
-              chordLabel.setText("Chord: " + chordInference.getChord(), juce::dontSendNotification);
+              float conf = currentConfidence.load();
+              float energy = currentEnergy.load();
+
+              if (f > 0.0f && conf > 0.4f) {
+                  noteLabel.setText(PitchDetector::freqToNote(f), juce::dontSendNotification);
+                  chordLabel.setText(chordInference.getChord(), juce::dontSendNotification);
+                  stateLabel.setText("SINGING", juce::dontSendNotification);
+                  stateLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
+              } else if (energy > 0.02f) {
+                  noteLabel.setText("-", juce::dontSendNotification);
+                  chordLabel.setText("-", juce::dontSendNotification);
+                  stateLabel.setText("TALKING (MUTED)", juce::dontSendNotification);
+                  stateLabel.setColour(juce::Label::textColourId, juce::Colours::yellow);
+              } else {
+                  noteLabel.setText("-", juce::dontSendNotification);
+                  chordLabel.setText("-", juce::dontSendNotification);
+                  if (arranger && arranger->isConnected()) {
+                      stateLabel.setText("LISTENING...", juce::dontSendNotification);
+                      stateLabel.setColour(juce::Label::textColourId, juce::Colours::green);
+                  } else {
+                      stateLabel.setText("WAITING FOR SERVER", juce::dontSendNotification);
+                      stateLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+                  }
+              }
+
+              repaint();
           }
           EOF
 
@@ -652,7 +855,7 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 5. ANDROID (Forced Permissions, Low SDK, Universal ABIs)
+  # 5. ANDROID
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
@@ -687,7 +890,6 @@ jobs:
       - name: Resolve Projucer dependencies
         run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
-      # THE PERMISSION FIX: Force inject permissions into the Manifest
       - name: Inject Permissions via Python
         run: |
           python3 -c "
@@ -696,7 +898,11 @@ jobs:
           tree = ET.parse(path)
           root = tree.getroot()
           ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
-          for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS']:
+          
+          # Add cleartext traffic for ws://
+          root.set('{http://schemas.android.com/apk/res/android}usesCleartextTraffic', 'true')
+          
+          for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.INTERNET']:
               elem = ET.Element('uses-permission')
               elem.set('{http://schemas.android.com/apk/res/android}name', perm)
               root.append(elem)
