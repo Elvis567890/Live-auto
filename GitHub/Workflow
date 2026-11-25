@@ -84,12 +84,12 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
-          # Link desktop OpenGL and networking for non-Android platforms
+          # --- PART 1: Desktop (Linux, Windows, macOS) Configuration ---
           if(NOT ANDROID)
             target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce_networking)
           endif()
 
-          # Android specific fixes
+          # --- PART 2: Android Specific Configuration ---
           if(ANDROID)
             # Only add the host's FreeType headers for compilation.
             # Do NOT link the host library; the --allow-shlib-undefined flag handles missing symbols.
@@ -590,6 +590,8 @@ jobs:
   build-linux:
     needs: scaffold
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -606,6 +608,7 @@ jobs:
           rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Linux app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
 
@@ -615,6 +618,8 @@ jobs:
   build-windows:
     needs: scaffold
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -629,6 +634,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Windows app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
 
@@ -638,6 +644,8 @@ jobs:
   build-macos:
     needs: scaffold
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -650,6 +658,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build build --config Release
       - name: Upload macOS app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
@@ -659,6 +668,8 @@ jobs:
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -694,6 +705,7 @@ jobs:
           cmake --build build-android --config Release
           
       - name: Upload Android APK
+        if: always()
         uses: actions/upload-artifact@v4
         with: 
           name: AILiveBand-android
