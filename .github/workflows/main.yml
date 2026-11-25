@@ -33,7 +33,11 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-          find_package(OpenGL REQUIRED)
+          # Only find desktop OpenGL for non-Android platforms
+          if(NOT ANDROID)
+            find_package(OpenGL REQUIRED)
+          endif()
+
           add_subdirectory(JUCE)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -57,7 +61,6 @@ jobs:
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/SoundFontSynth.cpp
           )
 
-          # 移除了废弃的 JUCE_DISPLAY_SPLASH_SCREEN=0
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
@@ -77,14 +80,18 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking
-            OpenGL::GL
-            OpenGL::GLU
+            juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
+          # Only link desktop OpenGL for non-Android platforms
+          if(NOT ANDROID)
+            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU)
+          endif()
+
+          # Android Freetype fixes
           if(ANDROID)
             set(FREETYPE_INCLUDE_DIRS "/usr/include/freetype2")
             set(FREETYPE_LIBRARY "/usr/lib/x86_64-linux-gnu/libfreetype.so")
@@ -304,7 +311,6 @@ jobs:
               struct PendingNote { int channel, pitch; int64 triggerMs; };
               std::vector<PendingNote> pendingNotes;
               std::atomic<bool> connected { false };
-              std::unique_ptr<juce::StreamingSocket> socket;
               juce::String aiResponse;
               juce::CriticalSection responseLock;
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
@@ -317,16 +323,16 @@ jobs:
           #ifndef AI_LIVE_BAND_SERVER_URL
           #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
           #endif
+          static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
           void Arranger::start() {
               connected.store(true);
               startTimerHz(30);
           }
-          void Arranger::stop() {
-              stopTimer();
-              if (socket) { socket->close(); socket.reset(); }
-              connected.store(false);
+          void Arranger::stop() { 
+              stopTimer(); 
+              connected.store(false); 
           }
           void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
               juce::ignoreUnused(midiNote, energy, pitchSpeed, chord);
