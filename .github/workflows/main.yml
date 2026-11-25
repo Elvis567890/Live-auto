@@ -88,11 +88,18 @@ jobs:
           endif()
 
           if(ANDROID)
-            # Only add include directories for FreeType, DO NOT link the host library
+            # Tell CMake where to find the host FreeType headers
             target_include_directories(AILiveBand PRIVATE "/usr/include/freetype2")
-            target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
+            
+            find_package(Freetype QUIET)
+            if(TARGET Freetype::Freetype)
+                target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
+            else()
+                # Fallback: link directly to the library name
+                target_link_libraries(AILiveBand PRIVATE freetype)
+            endif()
 
-            # Allow undefined symbols for shared libraries on Android
+            # Allow undefined symbols for the stubbed networking layer
             set_target_properties(AILiveBand PROPERTIES
                 LINK_FLAGS "-Wl,--allow-shlib-undefined"
             )
