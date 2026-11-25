@@ -68,6 +68,7 @@ jobs:
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
             AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
+            JUCE_DEBUG=1
           )
 
           target_link_libraries(AILiveBand PRIVATE
@@ -278,23 +279,32 @@ jobs:
 
           void SoundFontSynth::initialize(double sampleRate) {
               if (synth) { tsf_close(synth); synth = nullptr; }
-              if (BinaryData::SoundFont_sf2Size == 0) return; 
+              if (BinaryData::SoundFont_sf2Size == 0) {
+                  DBG("[Synth] ERROR: SoundFont is empty!");
+                  return;
+              }
               try {
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      // Defaults (will be overwritten by AI server if needed)
                       tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Piano
                       tsf_channel_set_presetnumber(synth, 1, 32, 0); // Bass
                       tsf_channel_set_presetnumber(synth, 2, 48, 0); // Strings
                       tsf_channel_set_presetnumber(synth, 3, 56, 0); // Trumpet
                       tsf_channel_set_presetnumber(synth, 4, 27, 0); // Guitar
                       tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Drums
+                      DBG("[Synth] Initialized successfully at " + juce::String(sampleRate) + " Hz");
+                  } else {
+                      DBG("[Synth] Failed to load memory");
                   }
-              } catch (...) { synth = nullptr; }
+              } catch (...) { 
+                  synth = nullptr; 
+                  DBG("[Synth] Exception loading SoundFont");
+              }
           }
 
           void SoundFontSynth::noteOn(int channel, int midiNote, float velocity) {
+              DBG("[Synth] NoteOn ch=" + juce::String(channel) + " note=" + juce::String(midiNote) + " vel=" + juce::String(velocity));
               if (synth) tsf_channel_note_on(synth, channel, midiNote, velocity);
           }
 
@@ -376,6 +386,7 @@ jobs:
 
           void Arranger::start()
           {
+              DBG("[Arranger] Attempting to connect to " + SERVER_URL);
               juce::URL url(SERVER_URL);
               socket = url.createWebSocket();
               if (socket == nullptr) {
@@ -388,9 +399,9 @@ jobs:
                   DBG("[Arranger] Connected to server");
               });
 
-              socket->setCloseCallback([this](int, const juce::String&) {
+              socket->setCloseCallback([this](int code, const juce::String& reason) {
                   connected.store(false);
-                  DBG("[Arranger] Disconnected");
+                  DBG("[Arranger] Disconnected. Code: " + juce::String(code) + " Reason: " + reason);
               });
 
               socket->setErrorCallback([this](const juce::String& err) {
@@ -399,6 +410,7 @@ jobs:
               });
 
               socket->setMessageCallback([this](const juce::String& msg) {
+                  DBG("[Arranger] Received: " + msg);
                   handleMessage(msg);
               });
 
@@ -480,15 +492,19 @@ jobs:
               juce::String type = obj->getProperty("type").toString();
               double timeOffset = (double)obj->getProperty("time");
 
+              DBG("[Arranger] Event type: " + type + " time: " + juce::String(timeOffset));
+
               if (type == "note") {
                   int pitch    = (int)obj->getProperty("pitch");
                   int velocity = obj->hasProperty("velocity") ? (int)obj->getProperty("velocity") : 100;
                   int duration = obj->hasProperty("duration") ? (int)obj->getProperty("duration") : 400;
                   int channel  = obj->hasProperty("channel")  ? (int)obj->getProperty("channel")  : 0;
+                  DBG("  -> Scheduling Note: ch=" + juce::String(channel) + " pitch=" + juce::String(pitch) + " dur=" + juce::String(duration));
                   scheduleNote(channel, pitch, velocity, duration, timeOffset);
               } else if (type == "program") {
                   int channel = (int)obj->getProperty("channel");
                   int program = (int)obj->getProperty("program");
+                  DBG("  -> Program Change: ch=" + juce::String(channel) + " prog=" + juce::String(program));
                   synth.setInstrument(channel, program);
               }
           }
@@ -526,6 +542,7 @@ jobs:
 
               juce::Label noteLabel, chordLabel, stateLabel;
               juce::TextButton startButton { "Start" };
+              juce::TextButton testButton { "Test AI" }; // NEW: Test AI button
               juce::TextButton settingsButton { "Settings" };
 
               std::atomic<float> currentFreq { 0.0f };
@@ -543,7 +560,7 @@ jobs:
 
           MainComponent::MainComponent() {
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(stateLabel);
-              addAndMakeVisible(startButton); addAndMakeVisible(settingsButton);
+              addAndMakeVisible(startButton); addAndMakeVisible(testButton); addAndMakeVisible(settingsButton);
 
               stateLabel.setFont(juce::Font(juce::FontOptions(28.0f, juce::Font::bold)));
               noteLabel.setFont(juce::Font(juce::FontOptions(48.0f, juce::Font::bold)));
@@ -558,6 +575,7 @@ jobs:
               stateLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
 
               startButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(0, 100, 80));
+              testButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(100, 80, 0));
               settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 40, 40));
 
               startButton.onClick = [this] {
@@ -573,6 +591,23 @@ jobs:
                       stateLabel.setText("OFFLINE", juce::dontSendNotification);
                       startButton.setButtonText("Start");
                   }
+              };
+
+              // NEW: Test AI Button logic
+              testButton.onClick = [this] {
+                  if (!arranger || !arranger->isConnected()) {
+                      DBG("[Main] Test AI clicked, but not connected.");
+                      return;
+                  }
+                  DBG("[Main] Sending 8 test notes to AI...");
+                  juce::Timer::callAfterDelay(0, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(200, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(400, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(600, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(800, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1000, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1200, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
+                  juce::Timer::callAfterDelay(1400, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
               };
 
               settingsButton.onClick = [this] { showAudioSettings(); };
@@ -646,7 +681,8 @@ jobs:
               
               area.removeFromBottom(80);
               auto buttonArea = area.removeFromBottom(60);
-              startButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 2).reduced(10));
+              startButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 3).reduced(10));
+              testButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 2).reduced(10));
               settingsButton.setBounds(buttonArea.reduced(10));
           }
 
