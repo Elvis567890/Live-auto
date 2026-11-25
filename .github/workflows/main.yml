@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ─────────────────────────────────────────────
+  # 1. SCAFFOLD
+  # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
     steps:
@@ -14,10 +17,6 @@ jobs:
         run: |
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
-
-      - name: Clone JUCE 8.0.6
-        run: |
-          git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
 
       - name: Create project files
         run: |
@@ -32,10 +31,17 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-          add_subdirectory(JUCE)
+          include(FetchContent)
+          FetchContent_Declare(
+            JUCE
+            GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+            GIT_TAG 8.0.6
+            GIT_SHALLOW TRUE
+          )
+          FetchContent_MakeAvailable(JUCE)
 
-          # Explicitly add networking module
-          juce_add_module(modules/juce_networking)
+          # FIX: Use the absolute path from FetchContent
+          juce_add_module(${juce_SOURCE_DIR}/modules/juce_networking)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
 
@@ -68,7 +74,7 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # Link networking without the juce:: prefix
+          # FIX: Link without the juce:: prefix
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
@@ -82,7 +88,6 @@ jobs:
           )
           EOF
 
-          # Use relative paths for Projucer to prevent CI path errors
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -145,7 +150,7 @@ jobs:
           </JUCERPROJECT>
           EOF
 
-          # (All C++ source files remain exactly the same as the previous workflow)
+          # --- Source Files ---
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -628,9 +633,11 @@ jobs:
           path: |
             CMakeLists.txt
             AILiveBand.jucer
-            JUCE/
             Source/
 
+  # ─────────────────────────────────────────────
+  # 2. LINUX
+  # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
     runs-on: ubuntu-latest
@@ -642,16 +649,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build pkg-config libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libxi-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev libegl-dev
       - name: Configure
-        run: |
-          echo "--- VERIFYING CMAKE FILE ---"
-          grep -n "juce_networking" CMakeLists.txt
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --config Release
       - name: Upload Linux app
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
 
+  # ─────────────────────────────────────────────
+  # 3. WINDOWS
+  # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
     runs-on: windows-latest
@@ -668,6 +675,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
 
+  # ─────────────────────────────────────────────
+  # 4. MACOS
+  # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
     runs-on: macos-latest
@@ -682,6 +692,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
+  # ─────────────────────────────────────────────
+  # 5. ANDROID
+  # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
@@ -701,6 +714,11 @@ jobs:
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" "platforms;android-34" "build-tools;34.0.0" --sdk_root=$ANDROID_HOME
+      
+      # FIX: Clone JUCE directly in the Android job instead of relying on artifacts
+      - name: Clone JUCE
+        run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
+      
       - name: Download Projucer
         run: |
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
@@ -709,10 +727,7 @@ jobs:
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
       
       - name: Resolve Projucer dependencies
-        run: |
-          ls -la JUCE/modules/juce_networking
-          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+        run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       
       - name: Inject Permissions via Python
         run: |
