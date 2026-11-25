@@ -33,6 +33,7 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+          find_package(OpenGL REQUIRED)
           add_subdirectory(JUCE)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -56,10 +57,10 @@ jobs:
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/SoundFontSynth.cpp
           )
 
+          # 移除了废弃的 JUCE_DISPLAY_SPLASH_SCREEN=0
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
-            JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
             AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
@@ -67,7 +68,7 @@ jobs:
           )
 
           if(NOT MSVC)
-            target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant)
+            target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant -Wno-unused-function)
           endif()
 
           target_link_libraries(AILiveBand PRIVATE
@@ -76,14 +77,15 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce_networking                # 修复：使用无前缀的 juce_networking
+            juce::juce_networking
+            OpenGL::GL
+            OpenGL::GLU
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
           if(ANDROID)
-            # 修复：显式指定 FreeType 头文件和库路径
             set(FREETYPE_INCLUDE_DIRS "/usr/include/freetype2")
             set(FREETYPE_LIBRARY "/usr/lib/x86_64-linux-gnu/libfreetype.so")
             find_package(Freetype REQUIRED)
@@ -92,7 +94,6 @@ jobs:
           endif()
           EOF
 
-          # --- 以下为完整的 C++ 源文件，内容与之前版本一致 ---
           # 2. Source/PitchDetector.h
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
@@ -303,6 +304,7 @@ jobs:
               struct PendingNote { int channel, pitch; int64 triggerMs; };
               std::vector<PendingNote> pendingNotes;
               std::atomic<bool> connected { false };
+              std::unique_ptr<juce::StreamingSocket> socket;
               juce::String aiResponse;
               juce::CriticalSection responseLock;
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
@@ -315,16 +317,16 @@ jobs:
           #ifndef AI_LIVE_BAND_SERVER_URL
           #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
           #endif
-          static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
           void Arranger::start() {
               connected.store(true);
               startTimerHz(30);
           }
-          void Arranger::stop() { 
-              stopTimer(); 
-              connected.store(false); 
+          void Arranger::stop() {
+              stopTimer();
+              if (socket) { socket->close(); socket.reset(); }
+              connected.store(false);
           }
           void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
               juce::ignoreUnused(midiNote, energy, pitchSpeed, chord);
