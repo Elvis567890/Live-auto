@@ -35,7 +35,7 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-          # Use the locally cloned JUCE directory
+          # 确保 add_subdirectory 在所有 juce_* 函数之前
           add_subdirectory(JUCE)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -69,22 +69,21 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # Link using the correct prefix (Fixed: removed juce:: from juce_networking)
+          # 链接正确的目标名
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce_networking
+            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
           EOF
 
-          # The .jucer file points to the relative path of the cloned JUCE modules
-          # This fixes the Projucer "invalid module paths" error
+          # 关键修复：在 .jucer 文件中硬编码绝对路径
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="ai-live-band" name="AILiveBand" projectType="guiapp" version="0.1.0" bundleIdentifier="com.ailiveband.app" companyName="AILiveBand" companyWebsite="" companyEmail="" defines="" headerPath="" jucerVersion="8.0.6" cppLanguageStandard="17" useAppConfig="1" displaySplashScreen="0">
@@ -120,21 +119,21 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
-            <!-- FIXED RELATIVE MODULE PATHS -->
+            <!-- 关键修复：硬编码绝对路径 -->
             <MODULEPATHS>
-              <MODULEPATH id="juce_audio_basics" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_audio_devices" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_audio_formats" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_audio_processors" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_audio_utils" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_core" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_data_structures" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_dsp" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_events" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_graphics" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_gui_basics" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_gui_extra" path="./JUCE/modules"/>
-              <MODULEPATH id="juce_networking" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_audio_basics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_devices" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_formats" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_processors" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_utils" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_core" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_data_structures" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_dsp" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_events" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_graphics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_gui_basics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_gui_extra" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_networking" path="${{ github.workspace }}/JUCE/modules"/>
             </MODULEPATHS>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
@@ -148,9 +147,8 @@ jobs:
           </JUCERPROJECT>
           EOF
 
-          # (The C++ source files PitchDetector, ChordInference, SoundFontSynth, Arranger, MainComponent, Main remain identical)
-          # ... [omitted for brevity, but they are exactly the same as in the previous full workflow] ...
-
+          # (C++ 源文件 PitchDetector, ChordInference, SoundFontSynth, Arranger, MainComponent, Main 保持不变)
+          # ...
       - uses: actions/upload-artifact@v4
         with:
           name: source
