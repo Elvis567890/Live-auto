@@ -37,7 +37,6 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
-          # Explicitly add networking module (not auto-included by FetchContent)
           juce_add_module(modules/juce_networking)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -119,6 +118,21 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
+            <MODULEPATHS>
+              <MODULEPATH id="juce_audio_basics" path="JUCE/modules"/>
+              <MODULEPATH id="juce_audio_devices" path="JUCE/modules"/>
+              <MODULEPATH id="juce_audio_formats" path="JUCE/modules"/>
+              <MODULEPATH id="juce_audio_processors" path="JUCE/modules"/>
+              <MODULEPATH id="juce_audio_utils" path="JUCE/modules"/>
+              <MODULEPATH id="juce_core" path="JUCE/modules"/>
+              <MODULEPATH id="juce_data_structures" path="JUCE/modules"/>
+              <MODULEPATH id="juce_dsp" path="JUCE/modules"/>
+              <MODULEPATH id="juce_events" path="JUCE/modules"/>
+              <MODULEPATH id="juce_graphics" path="JUCE/modules"/>
+              <MODULEPATH id="juce_gui_basics" path="JUCE/modules"/>
+              <MODULEPATH id="juce_gui_extra" path="JUCE/modules"/>
+              <MODULEPATH id="juce_networking" path="JUCE/modules"/>
+            </MODULEPATHS>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
                 <CONFIGURATIONS>
@@ -716,15 +730,10 @@ jobs:
           make -j$(nproc) CONFIG=Release
           cd ../../../../..
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
-      - name: Configure Projucer Global Paths
-        run: |
-          # Set the global module path to the absolute path of the JUCE modules folder
-          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+      
       - name: Resolve Projucer dependencies
-        run: |
-          # Set the path again before resaving, so Projucer can find the modules
-          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+        run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
+      
       - name: Inject Permissions via Python
         run: |
           python3 -c "
@@ -740,11 +749,14 @@ jobs:
               root.append(elem)
           tree.write(path, xml_declaration=True, encoding='utf-8')
           "
+
       - name: Force Universal ABIs in build.gradle
         run: |
           sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
+
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
+
       - name: Inject Memory Limits into gradle.properties
         run: |
           cat > Builds/Android/gradle.properties << 'EOF'
@@ -752,6 +764,7 @@ jobs:
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
+
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.0.2 }
       - name: Generate Debug Keystore
