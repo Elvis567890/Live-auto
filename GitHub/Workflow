@@ -7,9 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─────────────────────────────────────────────
-  # 1. SCAFFOLD
-  # ─────────────────────────────────────────────
   scaffold:
     runs-on: ubuntu-latest
     steps:
@@ -39,6 +36,9 @@ jobs:
             GIT_SHALLOW TRUE
           )
           FetchContent_MakeAvailable(JUCE)
+
+          # Explicitly add networking module (not auto-included by FetchContent)
+          juce_add_module(modules/juce_networking)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
 
@@ -77,7 +77,7 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking
+            juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
@@ -287,20 +287,15 @@ jobs:
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Piano
-                      tsf_channel_set_presetnumber(synth, 1, 32, 0); // Bass
-                      tsf_channel_set_presetnumber(synth, 2, 48, 0); // Strings
-                      tsf_channel_set_presetnumber(synth, 3, 56, 0); // Trumpet
-                      tsf_channel_set_presetnumber(synth, 4, 27, 0); // Guitar
-                      tsf_channel_set_presetnumber(synth, 9, 0, 1);  // Drums
+                      tsf_channel_set_presetnumber(synth, 0, 0, 0);
+                      tsf_channel_set_presetnumber(synth, 1, 32, 0);
+                      tsf_channel_set_presetnumber(synth, 2, 48, 0);
+                      tsf_channel_set_presetnumber(synth, 3, 56, 0);
+                      tsf_channel_set_presetnumber(synth, 4, 27, 0);
+                      tsf_channel_set_presetnumber(synth, 9, 0, 1);
                       DBG("[Synth] Initialized successfully at " + juce::String(sampleRate) + " Hz");
-                  } else {
-                      DBG("[Synth] Failed to load memory");
                   }
-              } catch (...) { 
-                  synth = nullptr; 
-                  DBG("[Synth] Exception loading SoundFont");
-              }
+              } catch (...) { synth = nullptr; }
           }
 
           void SoundFontSynth::noteOn(int channel, int midiNote, float velocity) {
@@ -331,7 +326,6 @@ jobs:
           }
           EOF
 
-          # Arranger (Reads new 'events' format from Python server)
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -343,169 +337,84 @@ jobs:
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
               ~Arranger() override;
-
               void start();
               void stop();
-
               void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
               bool isConnected() const { return connected.load(); }
-
           private:
               void timerCallback() override;
               void handleMessage(const juce::String& message);
               void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
               void handleEvent(const juce::var& event);
-
               ChordInference& chordEngine;
               SoundFontSynth& synth;
-
               struct PendingNote { int channel, pitch; int64 triggerMs; };
               std::vector<PendingNote> pendingNotes;
-
               std::unique_ptr<juce::WebSocket> socket;
               std::atomic<bool> connected { false };
               juce::String aiResponse;
               juce::CriticalSection responseLock;
-
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
           };
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
-
           #ifndef AI_LIVE_BAND_SERVER_URL
           #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
           #endif
-
           static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
-
-          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s)
-              : chordEngine(ci), synth(s) {}
-
+          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
-
-          void Arranger::start()
-          {
-              DBG("[Arranger] Attempting to connect to " + SERVER_URL);
+          void Arranger::start() {
               juce::URL url(SERVER_URL);
               socket = url.createWebSocket();
-              if (socket == nullptr) {
-                  DBG("[Arranger] Failed to create WebSocket from URL");
-                  return;
-              }
-
-              socket->setConnectCallback([this]() {
-                  connected.store(true);
-                  DBG("[Arranger] Connected to server");
-              });
-
-              socket->setCloseCallback([this](int code, const juce::String& reason) {
-                  connected.store(false);
-                  DBG("[Arranger] Disconnected. Code: " + juce::String(code) + " Reason: " + reason);
-              });
-
-              socket->setErrorCallback([this](const juce::String& err) {
-                  connected.store(false);
-                  DBG("[Arranger] WS error: " + err);
-              });
-
-              socket->setMessageCallback([this](const juce::String& msg) {
-                  DBG("[Arranger] Received: " + msg);
-                  handleMessage(msg);
-              });
-
+              if (socket == nullptr) return;
+              socket->setConnectCallback([this]() { connected.store(true); });
+              socket->setCloseCallback([this](int, const juce::String&) { connected.store(false); });
+              socket->setErrorCallback([this](const juce::String&) { connected.store(false); });
+              socket->setMessageCallback([this](const juce::String& msg) { const juce::ScopedLock sl(responseLock); aiResponse = msg; });
               startTimerHz(30);
           }
-
-          void Arranger::stop()
-          {
-              stopTimer();
-              if (socket != nullptr) {
-                  socket->close();
-                  socket.reset();
-              }
-              connected.store(false);
-          }
-
-          void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord)
-          {
-              if (!connected.load() || socket == nullptr) return;
-
+          void Arranger::stop() { stopTimer(); if (socket) { socket->close(); socket.reset(); } connected.store(false); }
+          void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
+              if (!connected.load() || !socket) return;
               juce::DynamicObject::Ptr obj = new juce::DynamicObject();
               obj->setProperty("pitch", midiNote);
               obj->setProperty("energy", energy);
               obj->setProperty("pitch_speed", pitchSpeed);
               obj->setProperty("chord", chord);
-
-              juce::String json = juce::JSON::toString(juce::var(obj.get()));
-              socket->sendTextMessage(json);
+              socket->sendTextMessage(juce::JSON::toString(juce::var(obj.get())));
           }
-
-          void Arranger::handleMessage(const juce::String& message)
-          {
-              const juce::ScopedLock sl(responseLock);
-              aiResponse = message;
-          }
-
-          void Arranger::timerCallback()
-          {
+          void Arranger::timerCallback() {
               juce::String msg;
-              {
-                  const juce::ScopedLock sl(responseLock);
-                  msg = aiResponse;
-                  if (msg.isEmpty()) return;
-                  aiResponse.clear();
-              }
-
+              { const juce::ScopedLock sl(responseLock); msg = aiResponse; if (msg.isEmpty()) return; aiResponse.clear(); }
               juce::var parsed = juce::JSON::parse(msg);
               if (auto* root = parsed.getDynamicObject()) {
                   if (auto* events = root->getProperty("events").getArray()) {
                       for (auto& ev : *events) handleEvent(ev);
                   }
               }
-
               const int64 now = juce::Time::currentTimeMillis();
               for (auto it = pendingNotes.begin(); it != pendingNotes.end(); ) {
-                  if (now >= it->triggerMs) {
-                      synth.noteOn(it->channel, it->pitch, 0.8f);
-                      it = pendingNotes.erase(it);
-                  } else ++it;
+                  if (now >= it->triggerMs) { synth.noteOn(it->channel, it->pitch, 0.8f); it = pendingNotes.erase(it); }
+                  else ++it;
               }
           }
-
-          void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs)
-          {
+          void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs) {
               juce::ignoreUnused(velocity);
-              const int64 trigger = juce::Time::currentTimeMillis() + (int64)timeOffsetMs;
-              pendingNotes.push_back({ channel, pitch, trigger });
-
-              juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] {
-                  synth.noteOff(channel, pitch);
-              });
+              pendingNotes.push_back({ channel, pitch, (int64)(juce::Time::currentTimeMillis() + (int64)timeOffsetMs) });
+              juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] { synth.noteOff(channel, pitch); });
           }
-
-          void Arranger::handleEvent(const juce::var& event)
-          {
+          void Arranger::handleEvent(const juce::var& event) {
               auto* obj = event.getDynamicObject();
-              if (obj == nullptr) return;
-
+              if (!obj) return;
               juce::String type = obj->getProperty("type").toString();
               double timeOffset = (double)obj->getProperty("time");
-
-              DBG("[Arranger] Event type: " + type + " time: " + juce::String(timeOffset));
-
               if (type == "note") {
-                  int pitch    = (int)obj->getProperty("pitch");
-                  int velocity = obj->hasProperty("velocity") ? (int)obj->getProperty("velocity") : 100;
-                  int duration = obj->hasProperty("duration") ? (int)obj->getProperty("duration") : 400;
-                  int channel  = obj->hasProperty("channel")  ? (int)obj->getProperty("channel")  : 0;
-                  DBG("  -> Scheduling Note: ch=" + juce::String(channel) + " pitch=" + juce::String(pitch) + " dur=" + juce::String(duration));
-                  scheduleNote(channel, pitch, velocity, duration, timeOffset);
+                  scheduleNote((int)obj->getProperty("channel"), (int)obj->getProperty("pitch"),
+                               (int)obj->getProperty("velocity"), (int)obj->getProperty("duration"), timeOffset);
               } else if (type == "program") {
-                  int channel = (int)obj->getProperty("channel");
-                  int program = (int)obj->getProperty("program");
-                  DBG("  -> Program Change: ch=" + juce::String(channel) + " prog=" + juce::String(program));
-                  synth.setInstrument(channel, program);
+                  synth.setInstrument((int)obj->getProperty("channel"), (int)obj->getProperty("program"));
               }
           }
           EOF
@@ -532,26 +441,21 @@ jobs:
               void startAudio();
               void stopAudio();
               void showAudioSettings();
-
               juce::AudioDeviceManager deviceManager;
               std::unique_ptr<PitchDetector> pitchDetector;
               ChordInference chordInference;
               SoundFontSynth synth;
               std::unique_ptr<Arranger> arranger;
               std::unique_ptr<juce::AudioDeviceSelectorComponent> deviceSelector;
-
               juce::Label noteLabel, chordLabel, stateLabel;
               juce::TextButton startButton { "Start" };
-              juce::TextButton testButton { "Test AI" }; // NEW: Test AI button
+              juce::TextButton testButton { "Test AI" };
               juce::TextButton settingsButton { "Settings" };
-
               std::atomic<float> currentFreq { 0.0f };
               std::atomic<float> currentConfidence { 0.0f };
               std::atomic<float> currentEnergy { 0.0f };
               std::atomic<float> pitchSpeed { 0.0f };
-              
               float lastPitch = 0.0f;
-
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
           };
           EOF
@@ -561,45 +465,29 @@ jobs:
           MainComponent::MainComponent() {
               addAndMakeVisible(noteLabel); addAndMakeVisible(chordLabel); addAndMakeVisible(stateLabel);
               addAndMakeVisible(startButton); addAndMakeVisible(testButton); addAndMakeVisible(settingsButton);
-
               stateLabel.setFont(juce::Font(juce::FontOptions(28.0f, juce::Font::bold)));
               noteLabel.setFont(juce::Font(juce::FontOptions(48.0f, juce::Font::bold)));
               chordLabel.setFont(juce::Font(juce::FontOptions(36.0f)));
-              
               noteLabel.setJustificationType(juce::Justification::centred);
               chordLabel.setJustificationType(juce::Justification::centred);
               stateLabel.setJustificationType(juce::Justification::centred);
-              
               noteLabel.setColour(juce::Label::textColourId, juce::Colours::white);
               chordLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(0, 255, 200));
               stateLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
-
               startButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(0, 100, 80));
               testButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(100, 80, 0));
               settingsButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 40, 40));
-
               startButton.onClick = [this] {
-                  if (deviceManager.getCurrentAudioDevice() == nullptr) {
+                  if (!deviceManager.getCurrentAudioDevice()) {
                       if (!juce::RuntimePermissions::isGranted(juce::RuntimePermissions::recordAudio)) {
                           juce::RuntimePermissions::request(juce::RuntimePermissions::recordAudio, [this](bool granted) {
-                              if (granted) startAudio();
-                              else stateLabel.setText("MIC DENIED", juce::dontSendNotification);
+                              if (granted) startAudio(); else stateLabel.setText("MIC DENIED", juce::dontSendNotification);
                           });
-                      } else { startAudio(); }
-                  } else { 
-                      stopAudio(); 
-                      stateLabel.setText("OFFLINE", juce::dontSendNotification);
-                      startButton.setButtonText("Start");
-                  }
+                      } else startAudio();
+                  } else { stopAudio(); stateLabel.setText("OFFLINE", juce::dontSendNotification); startButton.setButtonText("Start"); }
               };
-
-              // NEW: Test AI Button logic
               testButton.onClick = [this] {
-                  if (!arranger || !arranger->isConnected()) {
-                      DBG("[Main] Test AI clicked, but not connected.");
-                      return;
-                  }
-                  DBG("[Main] Sending 8 test notes to AI...");
+                  if (!arranger || !arranger->isConnected()) return;
                   juce::Timer::callAfterDelay(0, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
                   juce::Timer::callAfterDelay(200, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
                   juce::Timer::callAfterDelay(400, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
@@ -609,19 +497,14 @@ jobs:
                   juce::Timer::callAfterDelay(1200, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
                   juce::Timer::callAfterDelay(1400, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
               };
-
               settingsButton.onClick = [this] { showAudioSettings(); };
-
               setSize(700, 600);
               startTimerHz(60);
           }
-
           MainComponent::~MainComponent() { stopTimer(); stopAudio(); }
-
           void MainComponent::showAudioSettings() {
               if (!deviceSelector) {
-                  deviceSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(
-                      deviceManager, 1, 2, 2, 2, false, false, true, false);
+                  deviceSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(deviceManager, 1, 2, 2, 2, false, false, true, false);
                   deviceSelector->setSize(500, 400);
                   juce::DialogWindow::LaunchOptions options;
                   options.content.setNonOwned(deviceSelector.get());
@@ -633,100 +516,67 @@ jobs:
                   options.launchAsync();
               }
           }
-
           void MainComponent::startAudio() {
-              if (deviceManager.getCurrentAudioDevice() != nullptr) return;
+              if (deviceManager.getCurrentAudioDevice()) return;
               arranger = std::make_unique<Arranger>(chordInference, synth);
               auto err = deviceManager.initialiseWithDefaultDevices(1, 2);
-              if (err.isNotEmpty()) {
-                  stateLabel.setText("AUDIO ERROR", juce::dontSendNotification);
-                  arranger.reset();
-                  return;
-              }
+              if (err.isNotEmpty()) { stateLabel.setText("AUDIO ERROR", juce::dontSendNotification); arranger.reset(); return; }
               deviceManager.addAudioCallback(this);
               stateLabel.setText("WAITING FOR AI...", juce::dontSendNotification);
               startButton.setButtonText("Stop");
               if (arranger) arranger->start();
           }
-
           void MainComponent::stopAudio() {
               if (arranger) { arranger->stop(); arranger.reset(); }
-              if (deviceManager.getCurrentAudioDevice() != nullptr) {
-                  deviceManager.removeAudioCallback(this);
-                  deviceManager.closeAudioDevice();
-              }
+              if (deviceManager.getCurrentAudioDevice()) { deviceManager.removeAudioCallback(this); deviceManager.closeAudioDevice(); }
           }
-
           void MainComponent::paint(juce::Graphics& g) {
               g.fillAll(juce::Colour::fromRGB(10, 12, 18));
-              
               auto center = getLocalBounds().getCentre();
               float radius = 100.0f + (currentEnergy.load() * 200.0f);
-              
-              juce::ColourGradient grad(
-                  juce::Colour::fromRGB(0, 255, 200).withAlpha(0.2f), (float)center.x, (float)center.y,
-                  juce::Colour::fromRGB(0, 0, 0).withAlpha(0.0f), (float)center.x + radius, (float)center.y, true);
-              
+              juce::ColourGradient grad(juce::Colour::fromRGB(0, 255, 200).withAlpha(0.2f), (float)center.x, (float)center.y,
+                                        juce::Colour::fromRGB(0, 0, 0).withAlpha(0.0f), (float)center.x + radius, (float)center.y, true);
               g.setGradientFill(grad);
               g.fillEllipse((float)center.x - radius, (float)center.y - radius, radius * 2, radius * 2);
           }
-
           void MainComponent::resized() {
               auto area = getLocalBounds().reduced(40);
-              
               stateLabel.setBounds(area.removeFromTop(60));
               area.removeFromTop(40);
               noteLabel.setBounds(area.removeFromTop(100));
               chordLabel.setBounds(area.removeFromTop(60));
-              
               area.removeFromBottom(80);
               auto buttonArea = area.removeFromBottom(60);
               startButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 3).reduced(10));
               testButton.setBounds(buttonArea.removeFromLeft(buttonArea.getWidth() / 2).reduced(10));
               settingsButton.setBounds(buttonArea.reduced(10));
           }
-
           void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice* device) {
               pitchDetector = std::make_unique<PitchDetector>(device->getCurrentSampleRate());
               synth.initialize(device->getCurrentSampleRate());
           }
-
           void MainComponent::audioDeviceStopped() { pitchDetector.reset(); }
-
           void MainComponent::audioDeviceIOCallbackWithContext(const float* const* inputChannelData, int numInputChannels, float* const* outputChannelData, int numOutputChannels, int numSamples, const juce::AudioIODeviceCallbackContext&) {
               if (numInputChannels > 0 && inputChannelData[0] && pitchDetector) {
                   float rms = 0.0f;
                   for (int i = 0; i < numSamples; ++i) rms += inputChannelData[0][i] * inputChannelData[0][i];
                   rms = std::sqrt(rms / numSamples);
-                  
                   float confidence = 0.0f;
                   float freq = pitchDetector->detect(inputChannelData[0], numSamples, confidence);
-                  
                   currentConfidence.store(confidence);
                   currentEnergy.store(rms);
-
                   if (freq > 0.0f && confidence > 0.4f) {
                       currentFreq.store(freq);
-                      float diff = std::abs(freq - lastPitch);
-                      pitchSpeed.store(diff / 100.0f); 
+                      pitchSpeed.store(std::abs(freq - lastPitch) / 100.0f);
                       lastPitch = freq;
                       chordInference.addNote(PitchDetector::freqToMidi(freq));
                   }
-
-                  if (arranger) {
-                      arranger->sendToServer(PitchDetector::freqToMidi(freq), rms, pitchSpeed.load(), chordInference.getChord());
-                  }
+                  if (arranger) arranger->sendToServer(PitchDetector::freqToMidi(freq), rms, pitchSpeed.load(), chordInference.getChord());
               }
-              if (numOutputChannels >= 2) {
-                  synth.render(outputChannelData[0], outputChannelData[1], numSamples);
-              }
+              if (numOutputChannels >= 2) synth.render(outputChannelData[0], outputChannelData[1], numSamples);
           }
-
           void MainComponent::timerCallback() {
-              float f = currentFreq.load();
-              float conf = currentConfidence.load();
-              float energy = currentEnergy.load();
-
+              float f = currentFreq.load(); float conf = currentConfidence.load(); float energy = currentEnergy.load();
               if (f > 0.0f && conf > 0.4f) {
                   noteLabel.setText(PitchDetector::freqToNote(f), juce::dontSendNotification);
                   chordLabel.setText(chordInference.getChord(), juce::dontSendNotification);
@@ -740,15 +590,9 @@ jobs:
               } else {
                   noteLabel.setText("-", juce::dontSendNotification);
                   chordLabel.setText("-", juce::dontSendNotification);
-                  if (arranger && arranger->isConnected()) {
-                      stateLabel.setText("LISTENING...", juce::dontSendNotification);
-                      stateLabel.setColour(juce::Label::textColourId, juce::Colours::green);
-                  } else {
-                      stateLabel.setText("WAITING FOR SERVER", juce::dontSendNotification);
-                      stateLabel.setColour(juce::Label::textColourId, juce::Colours::red);
-                  }
+                  if (arranger && arranger->isConnected()) { stateLabel.setText("LISTENING...", juce::dontSendNotification); stateLabel.setColour(juce::Label::textColourId, juce::Colours::green); }
+                  else { stateLabel.setText("WAITING FOR SERVER", juce::dontSendNotification); stateLabel.setColour(juce::Label::textColourId, juce::Colours::red); }
               }
-
               repaint();
           }
           EOF
@@ -766,7 +610,7 @@ jobs:
               void systemRequestedQuit() override { quit(); }
               class MainWindow : public juce::DocumentWindow {
               public:
-                  explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black, 
+                  explicit MainWindow(juce::String name) : DocumentWindow(name, juce::Colours::black,
                       #if JUCE_ANDROID
                       0
                       #else
@@ -797,9 +641,6 @@ jobs:
             AILiveBand.jucer
             Source/
 
-  # ─────────────────────────────────────────────
-  # 2. LINUX
-  # ─────────────────────────────────────────────
   build-linux:
     needs: scaffold
     runs-on: ubuntu-latest
@@ -818,9 +659,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
 
-  # ─────────────────────────────────────────────
-  # 3. WINDOWS
-  # ─────────────────────────────────────────────
   build-windows:
     needs: scaffold
     runs-on: windows-latest
@@ -837,9 +675,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
 
-  # ─────────────────────────────────────────────
-  # 4. macOS
-  # ─────────────────────────────────────────────
   build-macos:
     needs: scaffold
     runs-on: macos-latest
@@ -854,9 +689,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
-  # ─────────────────────────────────────────────
-  # 5. ANDROID
-  # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
@@ -885,11 +717,14 @@ jobs:
           cd ../../../../..
           echo "PROJUCER_PATH=$(pwd)/JUCE/extras/Projucer/Builds/LinuxMakefile/build/Projucer" >> $GITHUB_ENV
       - name: Configure Projucer Global Paths
-        run: ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-      
+        run: |
+          # Set the global module path to the absolute path of the JUCE modules folder
+          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
       - name: Resolve Projucer dependencies
-        run: ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
-      
+        run: |
+          # Set the path again before resaving, so Projucer can find the modules
+          ${{ env.PROJUCER_PATH }} --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+          ${{ env.PROJUCER_PATH }} --resave AILiveBand.jucer
       - name: Inject Permissions via Python
         run: |
           python3 -c "
@@ -898,24 +733,18 @@ jobs:
           tree = ET.parse(path)
           root = tree.getroot()
           ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
-          
-          # Add cleartext traffic for ws://
           root.set('{http://schemas.android.com/apk/res/android}usesCleartextTraffic', 'true')
-          
           for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.INTERNET']:
               elem = ET.Element('uses-permission')
               elem.set('{http://schemas.android.com/apk/res/android}name', perm)
               root.append(elem)
           tree.write(path, xml_declaration=True, encoding='utf-8')
           "
-
       - name: Force Universal ABIs in build.gradle
         run: |
           sed -i '/defaultConfig {/a \        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }' Builds/Android/app/build.gradle
-
       - name: Fix Android SDK Location
         run: echo "sdk.dir=$ANDROID_HOME" > Builds/Android/local.properties
-
       - name: Inject Memory Limits into gradle.properties
         run: |
           cat > Builds/Android/gradle.properties << 'EOF'
@@ -923,7 +752,6 @@ jobs:
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
-
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.0.2 }
       - name: Generate Debug Keystore
