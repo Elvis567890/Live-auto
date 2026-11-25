@@ -69,21 +69,21 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # Link using the correct 'juce::' prefix
+          # Link using the correct prefix (Fixed: removed juce:: from juce_networking)
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking
+            juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
           EOF
 
-          # The .jucer file now points to the absolute path of the cloned JUCE modules
+          # The .jucer file points to the relative path of the cloned JUCE modules
           # This fixes the Projucer "invalid module paths" error
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -120,21 +120,21 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
-            <!-- HARDCODED ABSOLUTE MODULE PATHS -->
+            <!-- FIXED RELATIVE MODULE PATHS -->
             <MODULEPATHS>
-              <MODULEPATH id="juce_audio_basics" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_devices" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_formats" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_processors" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_utils" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_core" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_data_structures" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_dsp" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_events" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_graphics" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_gui_basics" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_gui_extra" path="${{ github.workspace }}/JUCE/modules"/>
-              <MODULEPATH id="juce_networking" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_basics" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_audio_devices" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_audio_formats" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_audio_processors" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_audio_utils" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_core" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_data_structures" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_dsp" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_events" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_graphics" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_gui_basics" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_gui_extra" path="./JUCE/modules"/>
+              <MODULEPATH id="juce_networking" path="./JUCE/modules"/>
             </MODULEPATHS>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
