@@ -37,7 +37,7 @@ jobs:
           )
           FetchContent_MakeAvailable(JUCE)
 
-          # Correct way to add the networking module from the fetched source
+          # Correctly add the networking module from the fetched source
           juce_add_module(${juce_SOURCE_DIR}/modules/juce_networking)
 
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
@@ -71,7 +71,7 @@ jobs:
             JUCE_DEBUG=1
           )
 
-          # Link to juce_networking WITHOUT the juce:: namespace
+          # Link to juce_networking WITHOUT the juce:: prefix
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
@@ -120,21 +120,20 @@ jobs:
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0"/>
               <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0"/>
             </MODULES>
-            <!-- ABSOLUTE MODULE PATHS to fix Projucer CLI bug -->
             <MODULEPATHS>
-              <MODULEPATH id="juce_audio_basics" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_devices" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_formats" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_processors" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_audio_utils" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_core" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_data_structures" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_dsp" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_events" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_graphics" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_gui_basics" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_gui_extra" path="$(pwd)/JUCE/modules"/>
-              <MODULEPATH id="juce_networking" path="$(pwd)/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_basics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_devices" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_formats" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_processors" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_audio_utils" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_core" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_data_structures" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_dsp" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_events" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_graphics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_gui_basics" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_gui_extra" path="${{ github.workspace }}/JUCE/modules"/>
+              <MODULEPATH id="juce_networking" path="${{ github.workspace }}/JUCE/modules"/>
             </MODULEPATHS>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO id="android-exporter" targetFolder="Builds/Android" minSdkVersion="21">
@@ -148,9 +147,9 @@ jobs:
           </JUCERPROJECT>
           EOF
 
-          # (PitchDetector.h, PitchDetector.cpp, ChordInference.h, ChordInference.cpp, SoundFontSynth.h, SoundFontSynth.cpp, Arranger.h, Arranger.cpp, MainComponent.h, MainComponent.cpp, Main.cpp)
-          # These files remain identical to the previous version.
-          # ... (Omitted for brevity, but they are exactly the same as in the last workflow) ...
+          # The C++ source files (PitchDetector.cpp, ChordInference.cpp, etc.) remain unchanged.
+          # They are omitted here for brevity but are identical to the previous workflow.
+          # ...
 
       - uses: actions/upload-artifact@v4
         with:
