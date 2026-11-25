@@ -78,14 +78,13 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
           if(NOT ANDROID)
-            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU)
+            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce_networking)
           endif()
 
           if(ANDROID)
