@@ -67,6 +67,7 @@ jobs:
             JUCE_DISPLAY_SPLASH_SCREEN=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
+            AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
           )
 
           target_link_libraries(AILiveBand PRIVATE
@@ -282,7 +283,7 @@ jobs:
                   synth = tsf_load_memory(BinaryData::SoundFont_sf2, BinaryData::SoundFont_sf2Size);
                   if (synth && sampleRate > 0) {
                       tsf_set_output(synth, TSF_STEREO_INTERLEAVED, (int)sampleRate, 0);
-                      // Defaults (will be overwritten by AI server)
+                      // Defaults (will be overwritten by AI server if needed)
                       tsf_channel_set_presetnumber(synth, 0, 0, 0);  // Piano
                       tsf_channel_set_presetnumber(synth, 1, 32, 0); // Bass
                       tsf_channel_set_presetnumber(synth, 2, 48, 0); // Strings
@@ -320,103 +321,175 @@ jobs:
           }
           EOF
 
-          # Arranger (Reading dynamic program changes)
+          # Arranger (Reads new 'events' format from Python server)
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
           #include "ChordInference.h"
           #include "SoundFontSynth.h"
 
-          class Arranger : public juce::Timer, public juce::WebSocketClient {
+          class Arranger : public juce::Timer
+          {
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
+              ~Arranger() override;
+
               void start();
               void stop();
+
               void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
-              bool isConnected() const { return isConnectedToServer; }
-              
-              void connectionOpened() override;
-              void connectionClosed() override;
-              void handleMessage(const juce::String& message) override;
+              bool isConnected() const { return connected.load(); }
 
           private:
               void timerCallback() override;
+              void handleMessage(const juce::String& message);
+              void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
+              void handleEvent(const juce::var& event);
+
               ChordInference& chordEngine;
               SoundFontSynth& synth;
-              int beatCounter = 0;
-              juce::String aiResponse = "";
-              bool isConnectedToServer = false;
+
+              struct PendingNote { int channel, pitch; int64 triggerMs; };
+              std::vector<PendingNote> pendingNotes;
+
+              std::unique_ptr<juce::WebSocket> socket;
+              std::atomic<bool> connected { false };
+              juce::String aiResponse;
+              juce::CriticalSection responseLock;
+
+              JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
           };
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
 
-          const std::string SERVER_ADDRESS = "ws://13.140.90.83:8765";
+          #ifndef AI_LIVE_BAND_SERVER_URL
+          #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
+          #endif
 
-          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
-          
-          void Arranger::start() { 
-              beatCounter = 0; 
-              startTimer(500); 
-              connect(SERVER_ADDRESS);
+          static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
+
+          Arranger::Arranger(ChordInference& ci, SoundFontSynth& s)
+              : chordEngine(ci), synth(s) {}
+
+          Arranger::~Arranger() { stop(); }
+
+          void Arranger::start()
+          {
+              juce::URL url(SERVER_URL);
+              socket = url.createWebSocket();
+              if (socket == nullptr) {
+                  DBG("[Arranger] Failed to create WebSocket from URL");
+                  return;
+              }
+
+              socket->setConnectCallback([this]() {
+                  connected.store(true);
+                  DBG("[Arranger] Connected to server");
+              });
+
+              socket->setCloseCallback([this](int, const juce::String&) {
+                  connected.store(false);
+                  DBG("[Arranger] Disconnected");
+              });
+
+              socket->setErrorCallback([this](const juce::String& err) {
+                  connected.store(false);
+                  DBG("[Arranger] WS error: " + err);
+              });
+
+              socket->setMessageCallback([this](const juce::String& msg) {
+                  handleMessage(msg);
+              });
+
+              startTimerHz(30);
           }
-          
-          void Arranger::stop() { stopTimer(); disconnect(); }
 
-          void Arranger::connectionOpened() { isConnectedToServer = true; }
-          void Arranger::connectionClosed() { isConnectedToServer = false; }
+          void Arranger::stop()
+          {
+              stopTimer();
+              if (socket != nullptr) {
+                  socket->close();
+                  socket.reset();
+              }
+              connected.store(false);
+          }
 
-          void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
-              if (!isConnectedToServer) return;
+          void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord)
+          {
+              if (!connected.load() || socket == nullptr) return;
+
               juce::DynamicObject::Ptr obj = new juce::DynamicObject();
               obj->setProperty("pitch", midiNote);
               obj->setProperty("energy", energy);
               obj->setProperty("pitch_speed", pitchSpeed);
               obj->setProperty("chord", chord);
-              auto json = juce::JSON::toString(juce::var(obj.get()));
-              sendTextMessage(json);
+
+              juce::String json = juce::JSON::toString(juce::var(obj.get()));
+              socket->sendTextMessage(json);
           }
 
-          void Arranger::handleMessage(const juce::String& message) {
+          void Arranger::handleMessage(const juce::String& message)
+          {
+              const juce::ScopedLock sl(responseLock);
               aiResponse = message;
           }
 
-          void Arranger::timerCallback() {
-              if (!isConnectedToServer) return;
-              
-              juce::var parsed = juce::JSON::parse(aiResponse);
-              if (auto* obj = parsed.getDynamicObject()) {
-                  
-                  // 1. Change Instruments dynamically based on AI commands
-                  if (auto* progs = obj->getProperty("programs").getDynamicObject()) {
-                      if (progs->hasProperty("piano")) synth.setInstrument(0, (int)progs->getProperty("piano"));
-                      if (progs->hasProperty("bass")) synth.setInstrument(1, (int)progs->getProperty("bass"));
-                      if (progs->hasProperty("strings")) synth.setInstrument(2, (int)progs->getProperty("strings"));
-                      if (progs->hasProperty("trumpet")) synth.setInstrument(3, (int)progs->getProperty("trumpet"));
-                      if (progs->hasProperty("guitar")) synth.setInstrument(4, (int)progs->getProperty("guitar"));
-                  }
+          void Arranger::timerCallback()
+          {
+              juce::String msg;
+              {
+                  const juce::ScopedLock sl(responseLock);
+                  msg = aiResponse;
+                  if (msg.isEmpty()) return;
+                  aiResponse.clear();
+              }
 
-                  // 2. Play the notes
-                  if (auto* inst = obj->getProperty("instruments").getDynamicObject()) {
-                      if (auto* bass = inst->getProperty("bass").getArray()) {
-                          for (auto& n : *bass) synth.noteOn(1, (int)n, 0.8f);
-                      }
-                      if (auto* piano = inst->getProperty("piano").getArray()) {
-                          for (auto& n : *piano) synth.noteOn(0, (int)n, 0.6f);
-                      }
-                      if (auto* strings = inst->getProperty("strings").getArray()) {
-                          for (auto& n : *strings) synth.noteOn(2, (int)n, 0.5f);
-                      }
-                      if (auto* trumpet = inst->getProperty("trumpet").getArray()) {
-                          for (auto& n : *trumpet) synth.noteOn(3, (int)n, 0.9f);
-                      }
-                      if (auto* guitar = inst->getProperty("guitar").getArray()) {
-                          for (auto& n : *guitar) synth.noteOn(4, (int)n, 0.8f);
-                      }
-                      if (auto* drums = inst->getProperty("drums").getArray()) {
-                          for (auto& d : *drums) synth.noteOn(9, (int)d, 0.9f);
-                      }
+              juce::var parsed = juce::JSON::parse(msg);
+              if (auto* root = parsed.getDynamicObject()) {
+                  if (auto* events = root->getProperty("events").getArray()) {
+                      for (auto& ev : *events) handleEvent(ev);
                   }
+              }
+
+              const int64 now = juce::Time::currentTimeMillis();
+              for (auto it = pendingNotes.begin(); it != pendingNotes.end(); ) {
+                  if (now >= it->triggerMs) {
+                      synth.noteOn(it->channel, it->pitch, 0.8f);
+                      it = pendingNotes.erase(it);
+                  } else ++it;
+              }
+          }
+
+          void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs)
+          {
+              juce::ignoreUnused(velocity);
+              const int64 trigger = juce::Time::currentTimeMillis() + (int64)timeOffsetMs;
+              pendingNotes.push_back({ channel, pitch, trigger });
+
+              juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] {
+                  synth.noteOff(channel, pitch);
+              });
+          }
+
+          void Arranger::handleEvent(const juce::var& event)
+          {
+              auto* obj = event.getDynamicObject();
+              if (obj == nullptr) return;
+
+              juce::String type = obj->getProperty("type").toString();
+              double timeOffset = (double)obj->getProperty("time");
+
+              if (type == "note") {
+                  int pitch    = (int)obj->getProperty("pitch");
+                  int velocity = obj->hasProperty("velocity") ? (int)obj->getProperty("velocity") : 100;
+                  int duration = obj->hasProperty("duration") ? (int)obj->getProperty("duration") : 400;
+                  int channel  = obj->hasProperty("channel")  ? (int)obj->getProperty("channel")  : 0;
+                  scheduleNote(channel, pitch, velocity, duration, timeOffset);
+              } else if (type == "program") {
+                  int channel = (int)obj->getProperty("channel");
+                  int program = (int)obj->getProperty("program");
+                  synth.setInstrument(channel, program);
               }
           }
           EOF
@@ -789,6 +862,10 @@ jobs:
           tree = ET.parse(path)
           root = tree.getroot()
           ET.register_namespace('android', 'http://schemas.android.com/apk/res/android')
+          
+          # Add cleartext traffic for ws://
+          root.set('{http://schemas.android.com/apk/res/android}usesCleartextTraffic', 'true')
+          
           for perm in ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS', 'android.permission.INTERNET']:
               elem = ET.Element('uses-permission')
               elem.set('{http://schemas.android.com/apk/res/android}name', perm)
