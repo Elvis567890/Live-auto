@@ -84,12 +84,12 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
-          # --- PART 1: Desktop (Linux, Windows, macOS) Configuration ---
+          # Link desktop OpenGL and networking for non-Android platforms
           if(NOT ANDROID)
-            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce_networking)
+            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_networking)
           endif()
 
-          # --- PART 2: Android Specific Configuration ---
+          # Android specific fixes
           if(ANDROID)
             # Only add the host's FreeType headers for compilation.
             # Do NOT link the host library; the --allow-shlib-undefined flag handles missing symbols.
