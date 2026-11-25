@@ -69,13 +69,14 @@ jobs:
             target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant)
           endif()
 
+          # ✅ 修复：使用无前缀的 juce_networking 目标名
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking          # ✅ 修复：添加 juce:: 前缀
+            juce_networking                # <-- 改这里
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
@@ -88,8 +89,8 @@ jobs:
           endif()
           EOF
 
-          # --- C++ Source Files (内容不变，此处省略以节省篇幅，与之前版本一致) ---
-          # ... 这里放置所有 .h 和 .cpp 文件的内容 ...
+          # --- C++ Source Files (内容与之前一致) ---
+          # ... 所有 .h 和 .cpp 文件的内容 ...
 
       - uses: actions/upload-artifact@v4
         with:
@@ -107,6 +108,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+      - name: Verify files
+        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Install Linux deps
@@ -130,6 +133,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+      - name: Verify files
+        run: dir
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Setup MSVC
@@ -151,6 +156,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+      - name: Verify files
+        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Configure & Build
@@ -170,6 +177,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+      - name: Verify files
+        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - uses: actions/setup-java@v4
@@ -181,7 +190,7 @@ jobs:
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
       
-      - name: Install Host Build Dependencies (X11 for juceaide)   # ✅ 新增：修复 X11 和 FreeType
+      - name: Install Host Build Dependencies (X11 & FreeType for juceaide)
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev
