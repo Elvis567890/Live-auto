@@ -25,16 +25,13 @@ jobs:
           mv tsf.h Source/tsf.h
           mv SoundFont.sf2 Source/SoundFont.sf2
 
-          # Create CMakeLists.txt
+          # 1. CMakeLists.txt
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
 
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-          # Find Freetype BEFORE adding JUCE so juceaide can find it for Android builds
-          find_package(Freetype REQUIRED)
 
           add_subdirectory(JUCE)
 
@@ -50,13 +47,14 @@ jobs:
 
           juce_generate_juce_header(AILiveBand)
 
+          # 修复：使用 ${CMAKE_CURRENT_SOURCE_DIR} 明确绝对路径
           target_sources(AILiveBand PRIVATE
-            Source/Main.cpp
-            Source/MainComponent.cpp
-            Source/PitchDetector.cpp
-            Source/ChordInference.cpp
-            Source/Arranger.cpp
-            Source/SoundFontSynth.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/Main.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/MainComponent.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/PitchDetector.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/ChordInference.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/Arranger.cpp
+            ${CMAKE_CURRENT_SOURCE_DIR}/Source/SoundFontSynth.cpp
           )
 
           target_compile_definitions(AILiveBand PRIVATE
@@ -79,19 +77,22 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce_networking
+            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
 
+          # 修复：针对 Android 工具链显式追加系统 FreeType 前缀路径
           if(ANDROID)
+            list(APPEND CMAKE_PREFIX_PATH "/usr")
+            find_package(Freetype REQUIRED)
             target_include_directories(AILiveBand PRIVATE ${FREETYPE_INCLUDE_DIRS})
             target_link_libraries(AILiveBand PRIVATE Freetype::Freetype)
           endif()
           EOF
 
-          # --- C++ Source Files ---
+          # 2. Source/PitchDetector.h
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -105,6 +106,8 @@ jobs:
               double sr;
           };
           EOF
+
+          # 3. Source/PitchDetector.cpp
           cat > Source/PitchDetector.cpp << 'EOF'
           #include "PitchDetector.h"
           PitchDetector::PitchDetector(double sampleRate) : sr(sampleRate) {}
@@ -142,6 +145,8 @@ jobs:
               return (int)std::round(69.0 + 12.0 * std::log2(freq / 440.0));
           }
           EOF
+
+          # 4. Source/ChordInference.h
           cat > Source/ChordInference.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -158,6 +163,8 @@ jobs:
               mutable juce::CriticalSection lock;
           };
           EOF
+
+          # 5. Source/ChordInference.cpp
           cat > Source/ChordInference.cpp << 'EOF'
           #include "ChordInference.h"
           namespace {
@@ -211,6 +218,8 @@ jobs:
               return notes;
           }
           EOF
+
+          # 6. Source/SoundFontSynth.h
           cat > Source/SoundFontSynth.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -228,6 +237,8 @@ jobs:
               tsf* synth = nullptr;
           };
           EOF
+
+          # 7. Source/SoundFontSynth.cpp
           cat > Source/SoundFontSynth.cpp << 'EOF'
           #include "SoundFontSynth.h"
           #define TSF_IMPLEMENTATION
@@ -267,6 +278,8 @@ jobs:
           }
           void SoundFontSynth::setInstrument(int channel, int programNumber) { if (synth) tsf_channel_set_presetnumber(synth, channel, programNumber, 0); }
           EOF
+
+          # 8. Source/Arranger.h
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -294,6 +307,8 @@ jobs:
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
           };
           EOF
+
+          # 9. Source/Arranger.cpp
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
           #ifndef AI_LIVE_BAND_SERVER_URL
@@ -303,7 +318,7 @@ jobs:
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
           void Arranger::start() {
-              connected.store(true); // Stubbed
+              connected.store(true);
               startTimerHz(30);
           }
           void Arranger::stop() { 
@@ -346,6 +361,8 @@ jobs:
               }
           }
           EOF
+
+          # 10. Source/MainComponent.h
           cat > Source/MainComponent.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -385,6 +402,8 @@ jobs:
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
           };
           EOF
+
+          # 11. Source/MainComponent.cpp
           cat > Source/MainComponent.cpp << 'EOF'
           #include "MainComponent.h"
           MainComponent::MainComponent() {
@@ -521,6 +540,8 @@ jobs:
               repaint();
           }
           EOF
+
+          # 12. Source/Main.cpp
           cat > Source/Main.cpp << 'EOF'
           #include <JuceHeader.h>
           #include "MainComponent.h"
@@ -655,10 +676,10 @@ jobs:
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
       
-      - name: Install Host Build Dependencies (X11 & FreeType for juceaide)
+      - name: Install Host Build Dependencies (X11 & FreeType & FontConfig)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev libfontconfig1-dev
       
       - name: Configure for Android
         run: |
