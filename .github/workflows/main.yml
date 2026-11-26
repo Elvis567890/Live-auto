@@ -84,7 +84,7 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
-          # Link desktop OpenGL and networking for non-Android platforms
+          # Link desktop OpenGL and networking (events) for non-Android platforms
           if(NOT ANDROID)
             target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_events)
           endif()
@@ -708,4 +708,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
-          path: build-android/AILiveBand_artefacts/Release/AI Live Band.apk
+          path: build-android/AILiveBand_artefacts/Release/AILiveBand.apk
