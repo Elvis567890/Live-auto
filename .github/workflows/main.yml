@@ -26,7 +26,6 @@ jobs:
           mv SoundFont.sf2 Source/SoundFont.sf2
 
           # ── Config.h (C++ Native Configuration) ──
-          # Defining this here bypasses ALL cross-platform CMake/Projucer macro issues.
           cat > Source/Config.h << 'EOF'
           #pragma once
           #define AI_LIVE_BAND_SERVER_URL "ws://13.140.90.83:8765"
@@ -97,7 +96,6 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # Removed preprocessorDefinitions. Added Config.h to the file list.
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -832,19 +830,30 @@ jobs:
           # 3. Inject NDK version
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
-          # ── SAFETY NET 1: Force-include headers and link the static library ──
+          # ── SAFETY NET 1: Patch build.gradle to force c++_shared STL ──
+          GRADLE_FILE="Builds/Android/app/build.gradle"
+          if [ -f "$GRADLE_FILE" ]; then
+            echo "✅ Patching build.gradle to set ANDROID_STL=c++_shared..."
+            # Inject the argument into the cmake block
+            sed -i '/externalNativeBuild {/,/}/ s|cppFlags ""|cppFlags "-DANDROID_STL=c++_shared"|' "$GRADLE_FILE"
+            # If the above didn't work, try appending to the cmake block
+            if ! grep -q 'ANDROID_STL=c++_shared' "$GRADLE_FILE"; then
+               sed -i '/externalNativeBuild {/,/}/ s|cmake {|cmake {\n                arguments "-DANDROID_STL=c++_shared"|' "$GRADLE_FILE"
+            fi
+          fi
+
+          # ── SAFETY NET 2: Force-include headers and link the static library in CMakeLists.txt ──
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
             echo "✅ Patching CMakeLists.txt to include IXWebSocket headers and link the library..."
             
-            # Add the include directory
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
             
-            # Inject c++_shared BEFORE the library to satisfy STL dependencies, and append the full path to the static library
+            # Inject c++_shared BEFORE the library to satisfy STL dependencies
             sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} c++_shared ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
           fi
 
-          # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
+          # ── SAFETY NET 3: Ensure RECORD_AUDIO permission is present ──
           MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
           if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
             echo "RECORD_AUDIO missing from manifest, injecting manually..."
@@ -866,7 +875,6 @@ jobs:
           APK_PATH=$(find Builds/Android -name "*.apk" | head -n 1)
           unzip -o "$APK_PATH" "lib/arm64-v8a/*.so" -d apk_check
           
-          # Use c++filt to demangle C++ symbols before grepping
           if nm -D apk_check/lib/arm64-v8a/*.so 2>/dev/null | c++filt | grep -q "ix::WebSocket"; then
             echo "✅ IXWebSocket symbols found. Library is linked."
           else
