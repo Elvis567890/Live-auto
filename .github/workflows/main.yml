@@ -86,13 +86,12 @@ jobs:
 
           # Link desktop OpenGL and networking for non-Android platforms
           if(NOT ANDROID)
-            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_networking)
+            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_events)
           endif()
 
           # Android specific fixes
           if(ANDROID)
             # Only add the host's FreeType headers for compilation.
-            # Do NOT link the host library; the --allow-shlib-undefined flag handles missing symbols.
             target_include_directories(AILiveBand PRIVATE "/usr/include/freetype2")
             
             set_target_properties(AILiveBand PROPERTIES
@@ -608,7 +607,7 @@ jobs:
           rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Linux app
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
 
@@ -634,7 +633,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Windows app
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
 
@@ -655,10 +654,10 @@ jobs:
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Configure & Build
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build build --config Release
       - name: Upload macOS app
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
@@ -705,7 +704,7 @@ jobs:
           cmake --build build-android --config Release
 
       - name: Upload Android APK
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AILiveBand-android
