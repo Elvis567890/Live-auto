@@ -91,7 +91,7 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # Includes headerSearchPaths for IXWebSocket
+          # Uses extraCompilerFlags instead of headerSearchPaths
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -132,8 +132,8 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" headerSearchPaths="IXWEBSOCKET_INCLUDE_PATH"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" headerSearchPaths="IXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -823,7 +823,17 @@ jobs:
           # Inject the NDK version directly into Gradle properties
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
-          # ── SAFETY NET: Ensure RECORD_AUDIO permission is present ──
+          # ── SAFETY NET 1: Inject include_directories directly into the generated CMakeLists.txt ──
+          CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
+          if [ -f "$CMAKE_FILE" ]; then
+            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers..."
+            sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
+          else
+            echo "::error::CMakeLists.txt not found at $CMAKE_FILE"
+            exit 1
+          fi
+
+          # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
           MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
           if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
             echo "RECORD_AUDIO missing from manifest, injecting manually..."
