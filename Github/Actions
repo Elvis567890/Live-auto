@@ -96,6 +96,7 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
+          # Note: Removed -DANDROID_STL=c++_shared and EXTRA_LIBRARIES_TO_LINK to prevent Gradle crashes
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -326,7 +327,7 @@ jobs:
           void SoundFontSynth::setInstrument(int channel, int programNumber) { if (synth) tsf_channel_set_presetnumber(synth, channel, programNumber, 0); }
           EOF
 
-          # ── Arranger (REAL IXWebSocket CLIENT) ──
+          # ── Arranger ──
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -831,12 +832,15 @@ jobs:
           # ── SAFETY NET 1: Force-include headers and link the static library in CMakeLists.txt ──
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers and link the library..."
+            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers, link the library, and force STL..."
             
-            # 1. Add the include directory
+            # 1. Force the C++ shared STL globally at the top of the file
+            sed -i "1i set(ANDROID_STL c++_shared)" "$CMAKE_FILE"
+            
+            # 2. Add the include directory right after project()
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
             
-            # 2. Append the full path to the static library to the end of the file
+            # 3. Append the full path to the static library to the end of the file
             echo "target_link_libraries(AILiveBand PRIVATE ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a)" >> "$CMAKE_FILE"
           fi
 
@@ -850,15 +854,6 @@ jobs:
           grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH" \
             && echo "✅ RECORD_AUDIO permission verified in manifest." \
             || (echo "::error::RECORD_AUDIO permission missing from manifest" && exit 1)
-
-          # ── SAFETY NET 3: Force DANDROID_STL into the Gradle CMake arguments ──
-          GRADLE_FILE="Builds/Android/app/build.gradle"
-          if [ -f "$GRADLE_FILE" ]; then
-            if ! grep -q 'DANDROID_STL=c++_shared' "$GRADLE_FILE"; then
-              echo "Injecting -DANDROID_STL=c++_shared into build.gradle..."
-              sed -i '/cmake {/a\                arguments "-DANDROID_STL=c++_shared"' "$GRADLE_FILE"
-            fi
-          fi
 
       - name: Build APK with Gradle
         run: |
