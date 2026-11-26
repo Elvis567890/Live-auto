@@ -834,14 +834,7 @@ jobs:
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
           fi
 
-          # ── SAFETY NET 2: Force-define the macro directly into the generated CMake file ──
-          # This bypasses the Projucer entirely for the macro definition
-          if [ -f "$CMAKE_FILE" ]; then
-            echo "✅ Patching CMakeLists.txt to define AI_LIVE_BAND_SERVER_URL..."
-            sed -i '/project/a add_definitions(-DAI_LIVE_BAND_SERVER_URL=\\"ws://13.140.90.83:8765\\")' "$CMAKE_FILE"
-          fi
-
-          # ── SAFETY NET 3: Ensure RECORD_AUDIO permission is present ──
+          # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
           MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
           if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
             echo "RECORD_AUDIO missing from manifest, injecting manually..."
