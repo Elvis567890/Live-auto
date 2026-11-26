@@ -793,6 +793,7 @@ jobs:
               -DUSE_TLS=OFF \
               -DBUILD_SHARED_LIBS=OFF \
               -DCMAKE_CXX_STANDARD=17 \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               -DCMAKE_BUILD_TYPE=Release
             cmake --build "ixwebsocket-src/build-${ABI}" --target ixwebsocket -j$(nproc)
             
@@ -830,12 +831,16 @@ jobs:
           # 3. Inject NDK version
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
-          # ── SAFETY NET 1: Force-include headers into CMakeLists.txt ──
-          # We still need this because Projucer sometimes drops external include paths for the JNI target
+          # ── SAFETY NET 1: Force-include headers and link the static library ──
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers..."
+            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers and link the library..."
+            
+            # Add the include directory
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
+            
+            # Append the full path to the static library to the target_link_libraries command
+            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
           fi
 
           # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
