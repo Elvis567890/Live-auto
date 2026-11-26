@@ -34,6 +34,10 @@ jobs:
             find_package(OpenGL REQUIRED)
           endif()
           add_subdirectory(JUCE)
+          
+          # FIX 1: Explicitly add the networking module to create the target
+          juce_add_module(JUCE/modules/juce_networking)
+          
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
@@ -733,6 +737,10 @@ jobs:
         run: |
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
+          
+          # FIX 2: Set the global module path for Projucer
+          Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+          
           Projucer --resave AILiveBand.jucer
 
       - name: Build APK with Gradle
