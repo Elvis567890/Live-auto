@@ -34,9 +34,10 @@ jobs:
             find_package(OpenGL REQUIRED)
           endif()
           add_subdirectory(JUCE)
-          
-          # REMOVED juce_add_module - built-in modules are handled automatically
-          
+
+          # 【关键修复 1】: 显式注册 juce_networking 模块，确保 CMake 能找到该 target
+          juce_add_module(JUCE/modules/juce_networking)
+
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
@@ -302,7 +303,7 @@ jobs:
           void SoundFontSynth::setInstrument(int channel, int programNumber) { if (synth) tsf_channel_set_presetnumber(synth, channel, programNumber, 0); }
           EOF
 
-          # --- Arranger (FIXED WITH ACTUAL WEBSOCKET) ---
+          # --- Arranger ---
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -737,7 +738,7 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
           
-          # Set the module path AND fix dependencies automatically
+          # 【关键修复 2】: 先设置正确的全局模块路径，再执行自动修复依赖
           Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
           Projucer --resave AILiveBand.jucer --fix-missing-dependencies
 
