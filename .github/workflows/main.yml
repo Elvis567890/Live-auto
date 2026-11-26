@@ -91,7 +91,6 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # Uses extraCompilerFlags instead of headerSearchPaths
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -128,12 +127,18 @@ jobs:
               <MODULE id="juce_audio_utils" showAllCode="1" useGlobalPath="1"/>
               <MODULE id="juce_dsp" showAllCode="1" useGlobalPath="1"/>
             </MODULES>
-            <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"/>
+            <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0"/>
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" 
+                                 extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" 
+                                 extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH" 
+                                 preprocessorDefinitions="AI_LIVE_BAND_SERVER_URL=&quot;ws://13.140.90.83:8765&quot;"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" 
+                                 extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" 
+                                 extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH" 
+                                 preprocessorDefinitions="AI_LIVE_BAND_SERVER_URL=&quot;ws://13.140.90.83:8765&quot;"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -807,33 +812,36 @@ jobs:
         run: |
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           
-          # Inject absolute paths into the .jucer file for Android
+          # 1. Substitute paths in the .jucer file
           sed -i "s|IXWEBSOCKET_LIB_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/libs|g" AILiveBand.jucer
           sed -i "s|IXWEBSOCKET_INCLUDE_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/include|g" AILiveBand.jucer
           
-          # Set JUCE module path and SDK path
+          # 2. Set Projucer paths and resave
           Projucer --set-global-search-path linux defaultJuceModulePath $GITHUB_WORKSPACE/JUCE/modules
           Projucer --set-global-search-path linux androidSDKPath $ANDROID_HOME
-          
           Projucer --resave AILiveBand.jucer
           
           echo "Verifying generated Android project..."
           ls -la Builds/Android/ || (echo "::error::Builds/Android not found" && exit 1)
           
-          # Inject the NDK version directly into Gradle properties
+          # 3. Inject NDK version
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
-          # ── SAFETY NET 1: Inject include_directories directly into the generated CMakeLists.txt ──
+          # ── SAFETY NET 1: Force-include headers into CMakeLists.txt ──
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
             echo "✅ Patching CMakeLists.txt to include IXWebSocket headers..."
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
-          else
-            echo "::error::CMakeLists.txt not found at $CMAKE_FILE"
-            exit 1
           fi
 
-          # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
+          # ── SAFETY NET 2: Force-define the macro directly into the generated CMake file ──
+          # This bypasses the Projucer entirely for the macro definition
+          if [ -f "$CMAKE_FILE" ]; then
+            echo "✅ Patching CMakeLists.txt to define AI_LIVE_BAND_SERVER_URL..."
+            sed -i '/project/a add_definitions(-DAI_LIVE_BAND_SERVER_URL=\\"ws://13.140.90.83:8765\\")' "$CMAKE_FILE"
+          fi
+
+          # ── SAFETY NET 3: Ensure RECORD_AUDIO permission is present ──
           MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
           if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
             echo "RECORD_AUDIO missing from manifest, injecting manually..."
