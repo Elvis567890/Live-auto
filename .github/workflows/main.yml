@@ -25,6 +25,7 @@ jobs:
           mv tsf.h Source/tsf.h
           mv SoundFont.sf2 Source/SoundFont.sf2
 
+          # Create the CMakeLists.txt (For Linux, Windows, macOS)
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
@@ -95,7 +96,44 @@ jobs:
           endif()
           EOF
 
-          # --- Complete C++ Source Files ---
+          # Create the .jucer file (For Android Projucer Generation)
+          cat > AILiveBand.jucer << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
+            <MAINGROUP id="m" name="AI Live Band">
+              <GROUP id="g" name="Source">
+                <FILE id="f1" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+                <FILE id="f2" name="MainComponent.cpp" compile="1" resource="0" file="Source/MainComponent.cpp"/>
+                <FILE id="f3" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
+                <FILE id="f4" name="PitchDetector.cpp" compile="1" resource="0" file="Source/PitchDetector.cpp"/>
+                <FILE id="f5" name="PitchDetector.h" compile="0" resource="0" file="Source/PitchDetector.h"/>
+                <FILE id="f6" name="ChordInference.cpp" compile="1" resource="0" file="Source/ChordInference.cpp"/>
+                <FILE id="f7" name="ChordInference.h" compile="0" resource="0" file="Source/ChordInference.h"/>
+                <FILE id="f8" name="Arranger.cpp" compile="1" resource="0" file="Source/Arranger.cpp"/>
+                <FILE id="f9" name="Arranger.h" compile="0" resource="0" file="Source/Arranger.h"/>
+                <FILE id="f10" name="SoundFontSynth.cpp" compile="1" resource="0" file="Source/SoundFontSynth.cpp"/>
+                <FILE id="f11" name="SoundFontSynth.h" compile="0" resource="0" file="Source/SoundFontSynth.h"/>
+                <FILE id="f12" name="tsf.h" compile="0" resource="0" file="Source/tsf.h"/>
+              </GROUP>
+              <GROUP id="g2" name="BinaryData">
+                <FILE id="f13" name="SoundFont.sf2" compile="0" resource="1" file="Source/SoundFont.sf2"/>
+              </GROUP>
+            </MAINGROUP>
+            <MODULES>
+              <MODULE id="juce_audio_utils" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+              <MODULE id="juce_audio_devices" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+              <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+              <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+              <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+            </MODULES>
+            <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765" JUCE_DEBUG="1"/>
+            <EXPORTFORMATS>
+              <ANDROIDEXPORTER targetFolder="Builds/Android" microphonesEnabled="1" microphonePermissionNeeded="1"/>
+            </EXPORTFORMATS>
+          </JUCERPROJECT>
+          EOF
+
+          # --- Complete C++ Source Files (Same as before) ---
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -576,6 +614,7 @@ jobs:
           name: source
           path: |
             CMakeLists.txt
+            AILiveBand.jucer
             Source/
 
   # ─────────────────────────────────────────────
@@ -645,11 +684,13 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 4. ANDROID (Zip Source & Build Output)
+  # 4. ANDROID (Projucer + Gradle APK Build)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -663,35 +704,56 @@ jobs:
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
-      - name: Install Host Build Dependencies (X11 & FreeType & FontConfig)
+      - name: Install Host Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev libfontconfig1-dev zip
-      
-      - name: Configure for Android
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev libfontconfig1-dev libasound2-dev
+
+      - name: Build Projucer CLI
         run: |
+          cd JUCE/extras/Projucer/Builds/LinuxMakefile
+          make CXXFLAGS="-std=c++17" -j$(nproc)
+          echo "$GITHUB_WORKSPACE/JUCE/extras/Projucer/Builds/LinuxMakefile/build" >> $GITHUB_PATH
+
+      - name: Generate Android Gradle Project via Projucer
+        run: |
+          # Tell Projucer where the SDK is
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
-          cmake -B build-android -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          
+          # Run Projucer to generate the Android project
+          Projucer --resave AILiveBand.jucer
+          
+          # Verify Gradle files were created
+          ls -la Builds/Android/
 
-      - name: Build C++ via CMake
+      - name: Build APK with Gradle
         run: |
-          cmake --build build-android --config Release
+          cd Builds/Android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-      - name: Zip Project and Build Output
-        if: always()
+      - name: Locate and Copy APK
         run: |
-          # This zips your source code, CMake files, and the build-android folder
-          # You can download this, unzip it, and open it in Android Studio or run Gradle manually.
-          zip -r AILiveBand-Android-Project.zip CMakeLists.txt Source build-android
+          echo "Searching for APK files..."
+          find Builds/Android -name "*.apk" -type f || echo "No .apk files found"
+          
+          APK_PATH=$(find Builds/Android -name "*.apk" -type f | head -n 1)
+          
+          if [ -n "$APK_PATH" ]; then
+            echo "Success! APK found at: $APK_PATH"
+            cp "$APK_PATH" ./AILiveBand.apk
+            ls -la ./AILiveBand.apk
+          else
+            echo "::error::No APK file was generated by the build."
+            exit 1
+          fi
 
-      - name: Upload Android Zip to Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: AILiveBand-Android-Zip
-          path: AILiveBand-Android-Project.zip
+          files: ./AILiveBand.apk
+          tag_name: android-build-${{ github.run_number }}
+          name: Android Build ${{ github.run_number }}
+          draft: false
+          prerelease: false
