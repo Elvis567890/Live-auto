@@ -25,6 +25,13 @@ jobs:
           mv tsf.h Source/tsf.h
           mv SoundFont.sf2 Source/SoundFont.sf2
 
+          # ── Config.h (C++ Native Configuration) ──
+          # Defining this here bypasses ALL cross-platform CMake/Projucer macro issues.
+          cat > Source/Config.h << 'EOF'
+          #pragma once
+          #define AI_LIVE_BAND_SERVER_URL "ws://13.140.90.83:8765"
+          EOF
+
           # ── CMakeLists.txt (DESKTOP ONLY: Linux, Windows, macOS) ──
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
@@ -70,7 +77,6 @@ jobs:
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
-            AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
           )
           if(NOT MSVC)
             target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant -Wno-unused-function)
@@ -91,7 +97,7 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # Added preprocessorDefinitions for the URL directly into the Android configs.
+          # Removed preprocessorDefinitions. Added Config.h to the file list.
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -109,6 +115,7 @@ jobs:
                 <FILE id="f10" name="SoundFontSynth.cpp" compile="1" resource="0" file="Source/SoundFontSynth.cpp"/>
                 <FILE id="f11" name="SoundFontSynth.h" compile="0" resource="0" file="Source/SoundFontSynth.h"/>
                 <FILE id="f12" name="tsf.h" compile="0" resource="0" file="Source/tsf.h"/>
+                <FILE id="f14" name="Config.h" compile="0" resource="0" file="Source/Config.h"/>
               </GROUP>
               <GROUP id="g2" name="BinaryData">
                 <FILE id="f13" name="SoundFont.sf2" compile="0" resource="1" file="Source/SoundFont.sf2"/>
@@ -132,8 +139,8 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" preprocessorDefinitions="AI_LIVE_BAND_SERVER_URL=&quot;ws://13.140.90.83:8765&quot;" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" preprocessorDefinitions="AI_LIVE_BAND_SERVER_URL=&quot;ws://13.140.90.83:8765&quot;" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -355,6 +362,7 @@ jobs:
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
+          #include "Config.h" // <--- NATIVE C++ CONFIG INCLUDE
 
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
@@ -823,6 +831,7 @@ jobs:
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
           # ── SAFETY NET 1: Force-include headers into CMakeLists.txt ──
+          # We still need this because Projucer sometimes drops external include paths for the JNI target
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
             echo "✅ Patching CMakeLists.txt to include IXWebSocket headers..."
