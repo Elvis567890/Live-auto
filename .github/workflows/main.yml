@@ -25,22 +25,16 @@ jobs:
           mv tsf.h Source/tsf.h
           mv SoundFont.sf2 Source/SoundFont.sf2
 
-          # Create the CMakeLists.txt (For Linux, Windows, macOS)
           cat > CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(AILiveBand VERSION 0.1.0 LANGUAGES C CXX)
-
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
           if(NOT ANDROID)
             find_package(OpenGL REQUIRED)
           endif()
-
           add_subdirectory(JUCE)
-
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
-
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
             COMPANY_NAME "AILiveBand"
@@ -48,9 +42,7 @@ jobs:
             MICROPHONE_PERMISSION_ENABLED TRUE
             MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access."
           )
-
           juce_generate_juce_header(AILiveBand)
-
           target_sources(AILiveBand PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/Main.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/MainComponent.cpp
@@ -59,44 +51,36 @@ jobs:
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/Arranger.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/SoundFontSynth.cpp
           )
-
           target_compile_definitions(AILiveBand PRIVATE
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
             JUCE_APPLICATION_NAME_STRING="AI Live Band"
             JUCE_APPLICATION_VERSION_STRING="0.1.0"
             AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"
-            JUCE_DEBUG=1
           )
-
           if(NOT MSVC)
             target_compile_options(AILiveBand PRIVATE -Wno-zero-as-null-pointer-constant -Wno-unused-function)
           endif()
-
           target_link_libraries(AILiveBand PRIVATE
             BinaryData
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
+            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
           )
-
           if(NOT ANDROID)
             target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_events)
           endif()
-
           if(ANDROID)
             target_include_directories(AILiveBand PRIVATE "/usr/include/freetype2")
-            set_target_properties(AILiveBand PROPERTIES
-                LINK_FLAGS "-Wl,--allow-shlib-undefined"
-            )
+            set_target_properties(AILiveBand PROPERTIES LINK_FLAGS "-Wl,--allow-shlib-undefined")
           endif()
           EOF
 
-          # Create the .jucer file (For Android Projucer Generation)
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -125,15 +109,16 @@ jobs:
               <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
               <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
+              <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
             </MODULES>
-            <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765" JUCE_DEBUG="1"/>
+            <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"/>
             <EXPORTFORMATS>
               <ANDROIDEXPORTER targetFolder="Builds/Android" microphonesEnabled="1" microphonePermissionNeeded="1"/>
             </EXPORTFORMATS>
           </JUCERPROJECT>
           EOF
 
-          # --- Complete C++ Source Files (Same as before) ---
+          # --- PitchDetector ---
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -147,7 +132,6 @@ jobs:
               double sr;
           };
           EOF
-
           cat > Source/PitchDetector.cpp << 'EOF'
           #include "PitchDetector.h"
           PitchDetector::PitchDetector(double sampleRate) : sr(sampleRate) {}
@@ -186,6 +170,7 @@ jobs:
           }
           EOF
 
+          # --- ChordInference ---
           cat > Source/ChordInference.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -202,7 +187,6 @@ jobs:
               mutable juce::CriticalSection lock;
           };
           EOF
-
           cat > Source/ChordInference.cpp << 'EOF'
           #include "ChordInference.h"
           namespace {
@@ -257,6 +241,7 @@ jobs:
           }
           EOF
 
+          # --- SoundFontSynth ---
           cat > Source/SoundFontSynth.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -274,7 +259,6 @@ jobs:
               tsf* synth = nullptr;
           };
           EOF
-
           cat > Source/SoundFontSynth.cpp << 'EOF'
           #include "SoundFontSynth.h"
           #define TSF_IMPLEMENTATION
@@ -315,12 +299,14 @@ jobs:
           void SoundFontSynth::setInstrument(int channel, int programNumber) { if (synth) tsf_channel_set_presetnumber(synth, channel, programNumber, 0); }
           EOF
 
+          # --- Arranger (FIXED WITH ACTUAL WEBSOCKET) ---
           cat > Source/Arranger.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
           #include "ChordInference.h"
           #include "SoundFontSynth.h"
-          class Arranger : public juce::Timer {
+          
+          class Arranger : public juce::Timer, public juce::WebSocketClient {
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
               ~Arranger() override;
@@ -328,6 +314,10 @@ jobs:
               void stop();
               void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
               bool isConnected() const { return connected.load(); }
+              
+              void connectionOpened() override;
+              void connectionClosed() override;
+              void handleMessage(const juce::String& message) override;
           private:
               void timerCallback() override;
               void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
@@ -342,26 +332,46 @@ jobs:
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
           };
           EOF
-
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
           #ifndef AI_LIVE_BAND_SERVER_URL
           #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
           #endif
           static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
+
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
+
           void Arranger::start() {
-              connected.store(true);
+              connect(SERVER_URL); // ACTUALLY CONNECTS
               startTimerHz(30);
           }
+          
           void Arranger::stop() { 
               stopTimer(); 
+              disconnect();
               connected.store(false); 
           }
+
+          void Arranger::connectionOpened() { connected.store(true); }
+          void Arranger::connectionClosed() { connected.store(false); }
+
           void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
-              juce::ignoreUnused(midiNote, energy, pitchSpeed, chord);
+              if (!connected.load()) return;
+              juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+              obj->setProperty("pitch", midiNote);
+              obj->setProperty("energy", energy);
+              obj->setProperty("pitch_speed", pitchSpeed);
+              obj->setProperty("chord", chord);
+              auto json = juce::JSON::toString(juce::var(obj.get()));
+              sendTextMessage(json);
           }
+
+          void Arranger::handleMessage(const juce::String& message) {
+              const juce::ScopedLock sl(responseLock);
+              aiResponse = message;
+          }
+
           void Arranger::timerCallback() {
               juce::String msg;
               { const juce::ScopedLock sl(responseLock); msg = aiResponse; if (msg.isEmpty()) return; aiResponse.clear(); }
@@ -377,11 +387,13 @@ jobs:
                   else ++it;
               }
           }
+
           void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs) {
               juce::ignoreUnused(velocity);
               pendingNotes.push_back({ channel, pitch, (int64)(juce::Time::currentTimeMillis() + (int64)timeOffsetMs) });
               juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] { synth.noteOff(channel, pitch); });
           }
+
           void Arranger::handleEvent(const juce::var& event) {
               auto* obj = event.getDynamicObject();
               if (!obj) return;
@@ -396,6 +408,7 @@ jobs:
           }
           EOF
 
+          # --- MainComponent ---
           cat > Source/MainComponent.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -435,7 +448,6 @@ jobs:
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
           };
           EOF
-
           cat > Source/MainComponent.cpp << 'EOF'
           #include "MainComponent.h"
           MainComponent::MainComponent() {
@@ -468,10 +480,6 @@ jobs:
                   juce::Timer::callAfterDelay(200, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
                   juce::Timer::callAfterDelay(400, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
                   juce::Timer::callAfterDelay(600, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
-                  juce::Timer::callAfterDelay(800, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
-                  juce::Timer::callAfterDelay(1000, [this] { arranger->sendToServer(67, 0.8f, 0.1f, "Cmaj"); });
-                  juce::Timer::callAfterDelay(1200, [this] { arranger->sendToServer(60, 0.8f, 0.1f, "Cmaj"); });
-                  juce::Timer::callAfterDelay(1400, [this] { arranger->sendToServer(64, 0.8f, 0.1f, "Cmaj"); });
               };
               settingsButton.onClick = [this] { showAudioSettings(); };
               setSize(700, 600);
@@ -639,7 +647,7 @@ jobs:
       - name: Upload Linux app
         if: success()
         uses: actions/upload-artifact@v4
-        with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
+        with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI\ Live\ Band }
 
   # ─────────────────────────────────────────────
   # 2. WINDOWS
@@ -661,7 +669,7 @@ jobs:
       - name: Upload Windows app
         if: success()
         uses: actions/upload-artifact@v4
-        with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
+        with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI\ Live\ Band.exe }
 
   # ─────────────────────────────────────────────
   # 3. MACOS
@@ -681,7 +689,7 @@ jobs:
       - name: Upload macOS app
         if: success()
         uses: actions/upload-artifact@v4
-        with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
+        with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI\ Live\ Band.app }
 
   # ─────────────────────────────────────────────
   # 4. ANDROID (Projucer + Gradle APK Build)
@@ -689,8 +697,6 @@ jobs:
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -717,15 +723,9 @@ jobs:
 
       - name: Generate Android Gradle Project via Projucer
         run: |
-          # Tell Projucer where the SDK is
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
-          
-          # Run Projucer to generate the Android project
           Projucer --resave AILiveBand.jucer
-          
-          # Verify Gradle files were created
-          ls -la Builds/Android/
 
       - name: Build APK with Gradle
         run: |
@@ -735,25 +735,16 @@ jobs:
 
       - name: Locate and Copy APK
         run: |
-          echo "Searching for APK files..."
-          find Builds/Android -name "*.apk" -type f || echo "No .apk files found"
-          
           APK_PATH=$(find Builds/Android -name "*.apk" -type f | head -n 1)
-          
           if [ -n "$APK_PATH" ]; then
-            echo "Success! APK found at: $APK_PATH"
             cp "$APK_PATH" ./AILiveBand.apk
-            ls -la ./AILiveBand.apk
           else
-            echo "::error::No APK file was generated by the build."
+            echo "::error::No APK file was generated."
             exit 1
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
         with:
-          files: ./AILiveBand.apk
-          tag_name: android-build-${{ github.run_number }}
-          name: Android Build ${{ github.run_number }}
-          draft: false
-          prerelease: false
+          name: AILiveBand-android
+          path: ./AILiveBand.apk
