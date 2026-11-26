@@ -32,7 +32,6 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-          # Find desktop OpenGL only for non-Android platforms
           if(NOT ANDROID)
             find_package(OpenGL REQUIRED)
           endif()
@@ -84,16 +83,12 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
-          # Link desktop OpenGL and networking (events) for non-Android platforms
           if(NOT ANDROID)
             target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_events)
           endif()
 
-          # Android specific fixes
           if(ANDROID)
-            # Only add the host's FreeType headers for compilation.
             target_include_directories(AILiveBand PRIVATE "/usr/include/freetype2")
-            
             set_target_properties(AILiveBand PROPERTIES
                 LINK_FLAGS "-Wl,--allow-shlib-undefined"
             )
@@ -589,13 +584,9 @@ jobs:
   build-linux:
     needs: scaffold
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
-      - name: Verify files
-        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Install Linux deps
@@ -617,13 +608,9 @@ jobs:
   build-windows:
     needs: scaffold
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
-      - name: Verify files
-        run: dir
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Setup MSVC
@@ -643,13 +630,9 @@ jobs:
   build-macos:
     needs: scaffold
     runs-on: macos-latest
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
-      - name: Verify files
-        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - name: Configure & Build
@@ -662,18 +645,16 @@ jobs:
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
   # ─────────────────────────────────────────────
-  # 4. ANDROID (Native CMake)
+  # 4. ANDROID (Native CMake + Release)
   # ─────────────────────────────────────────────
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
-      - name: Verify files
-        run: ls -R .
       - name: Clone JUCE
         run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
       - uses: actions/setup-java@v4
@@ -684,12 +665,10 @@ jobs:
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
-
       - name: Install Host Build Dependencies (X11 & FreeType & FontConfig)
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev libfontconfig1-dev
-
       - name: Configure for Android
         run: |
           cmake -B build-android -G Ninja \
@@ -698,14 +677,22 @@ jobs:
             -DANDROID_PLATFORM=android-29 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-
       - name: Build APK via CMake
         run: |
           cmake --build build-android --config Release
 
-      - name: Upload Android APK
-        if: success()
-        uses: actions/upload-artifact@v4
+      # FIND THE APK AUTOMATICALLY (Bypasses path errors)
+      - name: Locate APK
+        run: |
+          find build-android -name "*.apk" -exec cp {} ./AILiveBand.apk \;
+          ls -la AILiveBand.apk
+
+      # CREATE GITHUB RELEASE
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: AILiveBand-android
-          path: build-android/AILiveBand_artefacts/Release/AILiveBand.apk
+          files: ./AILiveBand.apk
+          tag_name: android-build-${{ github.run_number }}
+          name: Android Build ${{ github.run_number }}
+          draft: false
+          prerelease: false
