@@ -859,8 +859,8 @@ jobs:
           GRADLE_FILE="Builds/Android/app/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
             echo "✅ Patching build.gradle to remove invalid CMake arguments..."
-            # Remove the argument from Gradle since we already set it in CMakeLists.txt
-            sed -i '/arguments "-DANDROID_STL=c++_shared"/d' "$GRADLE_FILE"
+            # Remove the problematic line regardless of quote style (single or double)
+            sed -i '/DANDROID_STL=c++_shared/d' "$GRADLE_FILE"
           fi
 
       - name: Build APK with Gradle
