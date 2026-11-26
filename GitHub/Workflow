@@ -137,8 +137,8 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH -DANDROID_STL=c++_shared"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH -DANDROID_STL=c++_shared"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -830,19 +830,19 @@ jobs:
           # 3. Inject NDK version
           echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
-          # ── SAFETY NET 1: Force-include headers, STL, and link the static library in CMakeLists.txt ──
+          # ── SAFETY NET 1: Force-include headers and link the static library in CMakeLists.txt ──
           CMAKE_FILE="Builds/Android/app/CMakeLists.txt"
           if [ -f "$CMAKE_FILE" ]; then
-            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers, force c++_shared STL, and link the library..."
+            echo "✅ Patching CMakeLists.txt to include IXWebSocket headers and link the library..."
             
-            # 1. Insert ANDROID_STL at the very top (before project() is called)
-            sed -i "1i set(ANDROID_STL c++_shared)" "$CMAKE_FILE"
+            # Note: The STL c++_shared is now injected properly via the .jucer file's extraCompilerFlags.
+            # We no longer inject set(ANDROID_STL c++_shared) here as it causes conflicts with Gradle.
             
-            # 2. Add the include directory
+            # 1. Add the include directory
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
             
-            # 3. Inject c++_shared BEFORE the library to satisfy STL dependencies, and append the full path to the static library
-            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} c++_shared ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
+            # 2. Append the full path to the static library
+            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
           fi
 
           # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
