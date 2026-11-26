@@ -37,15 +37,12 @@ jobs:
           
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
           
-          # 【关键修复】: 在 juce_add_gui_app 中显式包含 juce_networking 模块
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
             COMPANY_NAME "AILiveBand"
             VERSION "0.1.0"
             MICROPHONE_PERMISSION_ENABLED TRUE
             MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access."
-            MODULES
-              juce_networking
           )
           
           juce_generate_juce_header(AILiveBand)
@@ -73,7 +70,6 @@ jobs:
             juce::juce_audio_devices
             juce::juce_dsp
             juce::juce_gui_extra
-            juce::juce_networking
             PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags
@@ -115,7 +111,6 @@ jobs:
               <MODULE id="juce_dsp" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
               <MODULE id="juce_gui_extra" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
               <MODULE id="juce_events" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
-              <MODULE id="juce_networking" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
             </MODULES>
             <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"/>
             <EXPORTFORMATS>
@@ -312,7 +307,7 @@ jobs:
           #include "ChordInference.h"
           #include "SoundFontSynth.h"
           
-          class Arranger : public juce::Timer, public juce::WebSocketClient {
+          class Arranger : public juce::Timer {
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
               ~Arranger() override;
@@ -320,10 +315,6 @@ jobs:
               void stop();
               void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
               bool isConnected() const { return connected.load(); }
-              
-              void connectionOpened() override;
-              void connectionClosed() override;
-              void handleMessage(const juce::String& message) override;
           private:
               void timerCallback() override;
               void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
@@ -349,33 +340,17 @@ jobs:
           Arranger::~Arranger() { stop(); }
 
           void Arranger::start() {
-              connect(SERVER_URL);
+              connected.store(true);
               startTimerHz(30);
           }
           
           void Arranger::stop() { 
               stopTimer(); 
-              disconnect();
               connected.store(false); 
           }
 
-          void Arranger::connectionOpened() { connected.store(true); }
-          void Arranger::connectionClosed() { connected.store(false); }
-
           void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
-              if (!connected.load()) return;
-              juce::DynamicObject::Ptr obj = new juce::DynamicObject();
-              obj->setProperty("pitch", midiNote);
-              obj->setProperty("energy", energy);
-              obj->setProperty("pitch_speed", pitchSpeed);
-              obj->setProperty("chord", chord);
-              auto json = juce::JSON::toString(juce::var(obj.get()));
-              sendTextMessage(json);
-          }
-
-          void Arranger::handleMessage(const juce::String& message) {
-              const juce::ScopedLock sl(responseLock);
-              aiResponse = message;
+              juce::ignoreUnused(midiNote, energy, pitchSpeed, chord);
           }
 
           void Arranger::timerCallback() {
