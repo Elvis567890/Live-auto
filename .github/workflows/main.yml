@@ -834,12 +834,8 @@ jobs:
           GRADLE_FILE="Builds/Android/app/build.gradle"
           if [ -f "$GRADLE_FILE" ]; then
             echo "✅ Patching build.gradle to set ANDROID_STL=c++_shared..."
-            # Inject the argument into the cmake block
-            sed -i '/externalNativeBuild {/,/}/ s|cppFlags ""|cppFlags "-DANDROID_STL=c++_shared"|' "$GRADLE_FILE"
-            # If the above didn't work, try appending to the cmake block
-            if ! grep -q 'ANDROID_STL=c++_shared' "$GRADLE_FILE"; then
-               sed -i '/externalNativeBuild {/,/}/ s|cmake {|cmake {\n                arguments "-DANDROID_STL=c++_shared"|' "$GRADLE_FILE"
-            fi
+            # Use a more reliable sed pattern to insert the arguments line
+            sed -i '/cmake {/a \                arguments "-DANDROID_STL=c++_shared"' "$GRADLE_FILE"
           fi
 
           # ── SAFETY NET 2: Force-include headers and link the static library in CMakeLists.txt ──
