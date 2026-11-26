@@ -32,6 +32,7 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+          # Find desktop OpenGL only for non-Android platforms
           if(NOT ANDROID)
             find_package(OpenGL REQUIRED)
           endif()
@@ -83,10 +84,12 @@ jobs:
             juce::juce_recommended_warning_flags
           )
 
+          # Link desktop OpenGL and networking for non-Android platforms
           if(NOT ANDROID)
-            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce_networking)
+            target_link_libraries(AILiveBand PRIVATE OpenGL::GL OpenGL::GLU juce::juce_networking)
           endif()
 
+          # Android specific fixes
           if(ANDROID)
             # Only add the host's FreeType headers for compilation.
             # Do NOT link the host library; the --allow-shlib-undefined flag handles missing symbols.
@@ -98,6 +101,7 @@ jobs:
           endif()
           EOF
 
+          # --- Complete C++ Source Files ---
           cat > Source/PitchDetector.h << 'EOF'
           #pragma once
           #include <JuceHeader.h>
@@ -284,7 +288,6 @@ jobs:
           #include <JuceHeader.h>
           #include "ChordInference.h"
           #include "SoundFontSynth.h"
-
           class Arranger : public juce::Timer {
           public:
               Arranger(ChordInference& ci, SoundFontSynth& s);
@@ -293,18 +296,15 @@ jobs:
               void stop();
               void sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord);
               bool isConnected() const { return connected.load(); }
-
           private:
               void timerCallback() override;
               void scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs);
               void handleEvent(const juce::var& event);
-
               ChordInference& chordEngine;
               SoundFontSynth& synth;
               struct PendingNote { int channel, pitch; int64 triggerMs; };
               std::vector<PendingNote> pendingNotes;
               std::atomic<bool> connected { false };
-
               juce::String aiResponse;
               juce::CriticalSection responseLock;
               JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Arranger)
@@ -316,24 +316,20 @@ jobs:
           #ifndef AI_LIVE_BAND_SERVER_URL
           #define AI_LIVE_BAND_SERVER_URL "ws://127.0.0.1:8765"
           #endif
-
+          static const juce::String SERVER_URL = AI_LIVE_BAND_SERVER_URL;
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
-
           void Arranger::start() {
-              connected.store(true); 
+              connected.store(true);
               startTimerHz(30);
           }
-
           void Arranger::stop() { 
               stopTimer(); 
               connected.store(false); 
           }
-
           void Arranger::sendToServer(int midiNote, float energy, float pitchSpeed, juce::String chord) {
               juce::ignoreUnused(midiNote, energy, pitchSpeed, chord);
           }
-
           void Arranger::timerCallback() {
               juce::String msg;
               { const juce::ScopedLock sl(responseLock); msg = aiResponse; if (msg.isEmpty()) return; aiResponse.clear(); }
@@ -349,13 +345,11 @@ jobs:
                   else ++it;
               }
           }
-
           void Arranger::scheduleNote(int channel, int pitch, int velocity, int durationMs, double timeOffsetMs) {
               juce::ignoreUnused(velocity);
               pendingNotes.push_back({ channel, pitch, (int64)(juce::Time::currentTimeMillis() + (int64)timeOffsetMs) });
               juce::Timer::callAfterDelay(durationMs, [this, channel, pitch] { synth.noteOff(channel, pitch); });
           }
-
           void Arranger::handleEvent(const juce::var& event) {
               auto* obj = event.getDynamicObject();
               if (!obj) return;
@@ -596,6 +590,8 @@ jobs:
   build-linux:
     needs: scaffold
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -612,6 +608,7 @@ jobs:
           rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Linux app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-linux, path: build/AILiveBand_artefacts/Release/AI Live Band }
 
@@ -621,6 +618,8 @@ jobs:
   build-windows:
     needs: scaffold
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -635,6 +634,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
       - name: Upload Windows app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-windows, path: build/AILiveBand_artefacts/Release/AI Live Band.exe }
 
@@ -644,6 +644,8 @@ jobs:
   build-macos:
     needs: scaffold
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -656,6 +658,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build build --config Release
       - name: Upload macOS app
+        if: always()
         uses: actions/upload-artifact@v4
         with: { name: AILiveBand-macos, path: build/AILiveBand_artefacts/Release/AI Live Band.app }
 
@@ -665,6 +668,8 @@ jobs:
   build-android:
     needs: scaffold
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
@@ -680,12 +685,12 @@ jobs:
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
-      
+
       - name: Install Host Build Dependencies (X11 & FreeType & FontConfig)
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype6-dev libfontconfig1-dev
-      
+
       - name: Configure for Android
         run: |
           cmake -B build-android -G Ninja \
@@ -694,13 +699,14 @@ jobs:
             -DANDROID_PLATFORM=android-29 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-      
+
       - name: Build APK via CMake
         run: |
           cmake --build build-android --config Release
-          
+
       - name: Upload Android APK
+        if: always()
         uses: actions/upload-artifact@v4
-        with: 
+        with:
           name: AILiveBand-android
           path: build-android/AILiveBand_artefacts/Release/AI Live Band.apk
