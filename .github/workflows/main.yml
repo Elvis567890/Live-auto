@@ -34,18 +34,20 @@ jobs:
             find_package(OpenGL REQUIRED)
           endif()
           add_subdirectory(JUCE)
-
-          # 【关键修复 1】: 显式注册 juce_networking 模块，确保 CMake 能找到该 target
-          juce_add_module(JUCE/modules/juce_networking)
-
+          
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
+          
+          # 【关键修复】: 在 juce_add_gui_app 中显式包含 juce_networking 模块
           juce_add_gui_app(AILiveBand
             PRODUCT_NAME "AI Live Band"
             COMPANY_NAME "AILiveBand"
             VERSION "0.1.0"
             MICROPHONE_PERMISSION_ENABLED TRUE
             MICROPHONE_PERMISSION_TEXT "AI Live Band needs microphone access."
+            MODULES
+              juce_networking
           )
+          
           juce_generate_juce_header(AILiveBand)
           target_sources(AILiveBand PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/Source/Main.cpp
@@ -738,7 +740,7 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
           
-          # 【关键修复 2】: 先设置正确的全局模块路径，再执行自动修复依赖
+          # 设置正确的全局模块路径，并自动修复缺失的依赖
           Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
           Projucer --resave AILiveBand.jucer --fix-missing-dependencies
 
