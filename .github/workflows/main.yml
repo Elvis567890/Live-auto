@@ -790,6 +790,7 @@ jobs:
               -DCMAKE_TOOLCHAIN_FILE="$NDK_TOOLCHAIN" \
               -DANDROID_ABI="$ABI" \
               -DANDROID_PLATFORM=android-21 \
+              -DANDROID_STL=c++_shared \
               -DUSE_TLS=OFF \
               -DBUILD_SHARED_LIBS=OFF \
               -DCMAKE_CXX_STANDARD=17 \
@@ -839,8 +840,8 @@ jobs:
             # Add the include directory
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
             
-            # Append the full path to the static library to the target_link_libraries command
-            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
+            # Inject c++_shared BEFORE the library to satisfy STL dependencies, and append the full path to the static library
+            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} c++_shared ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
           fi
 
           # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
