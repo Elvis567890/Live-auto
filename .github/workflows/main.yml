@@ -91,8 +91,7 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # We use a placeholder for the library path, which will be replaced with 
-          # an absolute path in the Android job before Projucer runs.
+          # Added androidExtraPermissions="android.permission.RECORD_AUDIO"
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -131,7 +130,7 @@ jobs:
             </MODULES>
             <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0" AI_LIVE_BAND_SERVER_URL="ws://13.140.90.83:8765"/>
             <EXPORTFORMATS>
-              <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1">
+              <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
                   <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
                   <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
@@ -761,7 +760,7 @@ jobs:
           # Inject the ABSOLUTE path to the IXWebSocket libs into the .jucer file
           sed -i "s|IXWEBSOCKET_ABS_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/libs|g" AILiveBand.jucer
           
-          # Set JUCE module path and SDK path (NO NDK path here to avoid CLI validation error)
+          # Set JUCE module path and SDK path
           Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
           Projucer --set-global-search-path linux androidSDKPath $ANDROID_HOME
           
@@ -773,8 +772,15 @@ jobs:
           # Inject the NDK version directly into Gradle properties
           echo "android.ndkVersion=26.3.11579264" >> Builds/Android/gradle.properties
           
-          grep -q "android.permission.RECORD_AUDIO" Builds/Android/app/src/main/AndroidManifest.xml \
-            && echo "RECORD_AUDIO permission found." \
+          # ── SAFETY NET: Ensure RECORD_AUDIO permission is present ──
+          MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
+            echo "RECORD_AUDIO missing from manifest, injecting manually..."
+            sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />' "$MANIFEST_PATH"
+          fi
+          
+          grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH" \
+            && echo "✅ RECORD_AUDIO permission verified in manifest." \
             || (echo "::error::RECORD_AUDIO permission missing from manifest" && exit 1)
 
       - name: Build APK with Gradle
