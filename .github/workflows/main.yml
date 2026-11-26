@@ -35,8 +35,7 @@ jobs:
           endif()
           add_subdirectory(JUCE)
           
-          # FIX 1: Explicitly add the networking module to create the target
-          juce_add_module(JUCE/modules/juce_networking)
+          # REMOVED juce_add_module - built-in modules are handled automatically
           
           juce_add_binary_data(BinaryData SOURCES Source/SoundFont.sf2)
           juce_add_gui_app(AILiveBand
@@ -718,7 +717,7 @@ jobs:
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
           sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
-      - name: Install Host Build Dependencies (FIXED FOR LIBCURL)
+      - name: Install Host Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -738,10 +737,9 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
           
-          # FIX 2: Set the global module path for Projucer
+          # Set the module path AND fix dependencies automatically
           Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-          
-          Projucer --resave AILiveBand.jucer
+          Projucer --resave AILiveBand.jucer --fix-missing-dependencies
 
       - name: Build APK with Gradle
         run: |
