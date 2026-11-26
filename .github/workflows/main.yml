@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  JUCE_VERSION: 8.0.6
+  ANDROID_NDK_VERSION: 26.3.11579264
+
 jobs:
   scaffold:
     runs-on: ubuntu-latest
@@ -14,10 +18,6 @@ jobs:
         run: |
           curl -sL -o tsf.h https://raw.githubusercontent.com/schellingb/TinySoundFont/master/tsf.h
           curl -sL -o SoundFont.sf2 https://github.com/urish/cinto/raw/master/media/TimGM6mb.sf2
-
-      - name: Clone JUCE 8.0.6
-        run: |
-          git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
 
       - name: Create project files
         run: |
@@ -91,7 +91,7 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
-          # Added androidExtraPermissions="android.permission.RECORD_AUDIO"
+          # Includes headerSearchPaths for IXWebSocket
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -132,8 +132,8 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" headerSearchPaths="IXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" headerSearchPaths="IXWEBSOCKET_INCLUDE_PATH"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -630,8 +630,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: ${{ runner.os }}-juce-${{ env.JUCE_VERSION }}
+
       - name: Clone JUCE
-        run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --branch ${{ env.JUCE_VERSION }} --depth 1 https://github.com/juce-framework/JUCE.git
+
       - name: Install Linux deps
         run: |
           sudo apt-get update
@@ -640,10 +650,12 @@ jobs:
             libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev \
             libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
             libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev libegl-dev
+
       - name: Configure & Build
         run: |
           rm -rf build && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
+
       - name: Upload Linux app
         if: success()
         uses: actions/upload-artifact@v4
@@ -658,14 +670,26 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: ${{ runner.os }}-juce-${{ env.JUCE_VERSION }}
+
       - name: Clone JUCE
-        run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --branch ${{ env.JUCE_VERSION }} --depth 1 https://github.com/juce-framework/JUCE.git
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
+
       - name: Configure & Build
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
+
       - name: Upload Windows app
         if: success()
         uses: actions/upload-artifact@v4
@@ -680,12 +704,26 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: ${{ runner.os }}-juce-${{ env.JUCE_VERSION }}
+
       - name: Clone JUCE
-        run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --branch ${{ env.JUCE_VERSION }} --depth 1 https://github.com/juce-framework/JUCE.git
+
+      - name: Install Ninja
+        run: brew install ninja
+
       - name: Configure & Build
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           cmake --build build --config Release
+
       - name: Upload macOS app
         if: success()
         uses: actions/upload-artifact@v4
@@ -700,16 +738,28 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: source }
+
+      - name: Cache JUCE
+        id: cache-juce
+        uses: actions/cache@v4
+        with:
+          path: JUCE
+          key: ${{ runner.os }}-juce-${{ env.JUCE_VERSION }}
+
       - name: Clone JUCE
-        run: git clone --branch 8.0.6 --depth 1 https://github.com/juce-framework/JUCE.git
+        if: steps.cache-juce.outputs.cache-hit != 'true'
+        run: git clone --branch ${{ env.JUCE_VERSION }} --depth 1 https://github.com/juce-framework/JUCE.git
+
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - uses: android-actions/setup-android@v4
         with: { packages: '' }
+
       - name: Install Android NDK
         run: |
           yes | sdkmanager --licenses --sdk_root=$ANDROID_HOME || true
-          sdkmanager "ndk;26.3.11579264" --sdk_root=$ANDROID_HOME
+          sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}" --sdk_root=$ANDROID_HOME
+          
       - name: Install Host Build Dependencies
         run: |
           sudo apt-get update
@@ -724,7 +774,7 @@ jobs:
           git clone --depth 1 https://github.com/machinezone/IXWebSocket.git ixwebsocket-src
           mkdir -p ixwebsocket-android/libs ixwebsocket-android/include
           
-          NDK_TOOLCHAIN="$ANDROID_HOME/ndk/26.3.11579264/build/cmake/android.toolchain.cmake"
+          NDK_TOOLCHAIN="$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}/build/cmake/android.toolchain.cmake"
           
           for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
             mkdir -p "ixwebsocket-src/build-${ABI}"
@@ -750,18 +800,19 @@ jobs:
       - name: Build Projucer CLI
         run: |
           cd JUCE/extras/Projucer/Builds/LinuxMakefile
-          make CXXFLAGS="-std=c++17" -j$(nproc)
+          make -j$(nproc)
           echo "$GITHUB_WORKSPACE/JUCE/extras/Projucer/Builds/LinuxMakefile/build" >> $GITHUB_PATH
 
       - name: Generate Android Gradle Project via Projucer
         run: |
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           
-          # Inject the ABSOLUTE path to the IXWebSocket libs into the .jucer file
-          sed -i "s|IXWEBSOCKET_ABS_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/libs|g" AILiveBand.jucer
+          # Inject absolute paths into the .jucer file for Android
+          sed -i "s|IXWEBSOCKET_LIB_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/libs|g" AILiveBand.jucer
+          sed -i "s|IXWEBSOCKET_INCLUDE_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/include|g" AILiveBand.jucer
           
           # Set JUCE module path and SDK path
-          Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
+          Projucer --set-global-search-path linux defaultJuceModulePath $GITHUB_WORKSPACE/JUCE/modules
           Projucer --set-global-search-path linux androidSDKPath $ANDROID_HOME
           
           Projucer --resave AILiveBand.jucer
@@ -770,7 +821,7 @@ jobs:
           ls -la Builds/Android/ || (echo "::error::Builds/Android not found" && exit 1)
           
           # Inject the NDK version directly into Gradle properties
-          echo "android.ndkVersion=26.3.11579264" >> Builds/Android/gradle.properties
+          echo "android.ndkVersion=${{ env.ANDROID_NDK_VERSION }}" >> Builds/Android/gradle.properties
           
           # ── SAFETY NET: Ensure RECORD_AUDIO permission is present ──
           MANIFEST_PATH="Builds/Android/app/src/main/AndroidManifest.xml"
@@ -794,7 +845,8 @@ jobs:
           APK_PATH=$(find Builds/Android -name "*.apk" | head -n 1)
           unzip -o "$APK_PATH" "lib/arm64-v8a/*.so" -d apk_check
           
-          if nm -D apk_check/lib/arm64-v8a/*.so 2>/dev/null | grep -q "ix::WebSocket"; then
+          # Use c++filt to demangle C++ symbols before grepping
+          if nm -D apk_check/lib/arm64-v8a/*.so 2>/dev/null | c++filt | grep -q "ix::WebSocket"; then
             echo "✅ IXWebSocket symbols found. Library is linked."
           else
             echo "::error::IXWebSocket symbols NOT found. The library was not linked correctly."
