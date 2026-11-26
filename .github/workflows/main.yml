@@ -91,6 +91,8 @@ jobs:
           EOF
 
           # ── AILiveBand.jucer (ANDROID ONLY) ──
+          # We use a placeholder for the library path, which will be replaced with 
+          # an absolute path in the Android job before Projucer runs.
           cat > AILiveBand.jucer << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <JUCERPROJECT id="AILiveBand" name="AI Live Band" projectType="guiapp" version="0.1.0" companyName="AILiveBand" bundleIdentifier="com.ailiveband">
@@ -131,8 +133,8 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="../ixwebsocket-android/libs/${ANDROID_ABI}"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="../ixwebsocket-android/libs/${ANDROID_ABI}"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_ABS_PATH/${ANDROID_ABI}"/>
                 </CONFIGURATIONS>
                 <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
@@ -755,17 +757,22 @@ jobs:
       - name: Generate Android Gradle Project via Projucer
         run: |
           export ANDROID_SDK_ROOT=$ANDROID_HOME
-          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264
           
+          # Inject the ABSOLUTE path to the IXWebSocket libs into the .jucer file
+          sed -i "s|IXWEBSOCKET_ABS_PATH|$GITHUB_WORKSPACE/ixwebsocket-android/libs|g" AILiveBand.jucer
+          
+          # Set JUCE module path and SDK path (NO NDK path here to avoid CLI validation error)
           Projucer --set-global-search-path linux defaultJuceModulePath $(pwd)/JUCE/modules
-          # CORRECT IDENTIFIERS: androidSDKPath and androidNDKPath
           Projucer --set-global-search-path linux androidSDKPath $ANDROID_HOME
-          Projucer --set-global-search-path linux androidNDKPath $ANDROID_HOME/ndk/26.3.11579264
           
           Projucer --resave AILiveBand.jucer
           
           echo "Verifying generated Android project..."
           ls -la Builds/Android/ || (echo "::error::Builds/Android not found" && exit 1)
+          
+          # Inject the NDK version directly into Gradle properties
+          echo "android.ndkVersion=26.3.11579264" >> Builds/Android/gradle.properties
+          
           grep -q "android.permission.RECORD_AUDIO" Builds/Android/app/src/main/AndroidManifest.xml \
             && echo "RECORD_AUDIO permission found." \
             || (echo "::error::RECORD_AUDIO permission missing from manifest" && exit 1)
