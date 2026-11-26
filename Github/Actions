@@ -137,10 +137,9 @@ jobs:
             <EXPORTFORMATS>
               <ANDROIDSTUDIO targetFolder="Builds/Android" minSdkVersion="21" androidMicNeeded="1" androidExtraPermissions="android.permission.RECORD_AUDIO">
                 <CONFIGURATIONS>
-                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH -DANDROID_STL=c++_shared"/>
-                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH -DANDROID_STL=c++_shared"/>
+                  <CONFIGURATION name="Debug" isDebug="1" targetName="AILiveBand" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
+                  <CONFIGURATION name="Release" isDebug="0" targetName="AILiveBand" optimise="1" extraLibrarySearchPaths="IXWEBSOCKET_LIB_PATH/${ANDROID_ABI}" extraCompilerFlags="-IIXWEBSOCKET_INCLUDE_PATH"/>
                 </CONFIGURATIONS>
-                <EXTRA_LIBRARIES_TO_LINK>ixwebsocket</EXTRA_LIBRARIES_TO_LINK>
               </ANDROIDSTUDIO>
             </EXPORTFORMATS>
           </JUCERPROJECT>
@@ -360,7 +359,7 @@ jobs:
           EOF
           cat > Source/Arranger.cpp << 'EOF'
           #include "Arranger.h"
-          #include "Config.h" // <--- NATIVE C++ CONFIG INCLUDE
+          #include "Config.h"
 
           Arranger::Arranger(ChordInference& ci, SoundFontSynth& s) : chordEngine(ci), synth(s) {}
           Arranger::~Arranger() { stop(); }
@@ -402,8 +401,7 @@ jobs:
               webSocket.send(message.toStdString());
           }
 
-          void Arranger::timerCallback() {
-          }
+          void Arranger::timerCallback() {}
 
           void Arranger::handleEvent(const juce::var& event) {
               juce::ignoreUnused(event);
@@ -835,14 +833,11 @@ jobs:
           if [ -f "$CMAKE_FILE" ]; then
             echo "✅ Patching CMakeLists.txt to include IXWebSocket headers and link the library..."
             
-            # Note: The STL c++_shared is now injected properly via the .jucer file's extraCompilerFlags.
-            # We no longer inject set(ANDROID_STL c++_shared) here as it causes conflicts with Gradle.
-            
             # 1. Add the include directory
             sed -i "/project/a include_directories($GITHUB_WORKSPACE/ixwebsocket-android/include)" "$CMAKE_FILE"
             
-            # 2. Append the full path to the static library
-            sed -i "s|target_link_libraries( \${BINARY_NAME}|target_link_libraries( \${BINARY_NAME} ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a|" "$CMAKE_FILE"
+            # 2. Append the full path to the static library to the end of the file
+            echo "target_link_libraries(AILiveBand PRIVATE ${GITHUB_WORKSPACE}/ixwebsocket-android/libs/\${ANDROID_ABI}/libixwebsocket.a)" >> "$CMAKE_FILE"
           fi
 
           # ── SAFETY NET 2: Ensure RECORD_AUDIO permission is present ──
@@ -855,6 +850,15 @@ jobs:
           grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH" \
             && echo "✅ RECORD_AUDIO permission verified in manifest." \
             || (echo "::error::RECORD_AUDIO permission missing from manifest" && exit 1)
+
+          # ── SAFETY NET 3: Force DANDROID_STL into the Gradle CMake arguments ──
+          GRADLE_FILE="Builds/Android/app/build.gradle"
+          if [ -f "$GRADLE_FILE" ]; then
+            if ! grep -q 'DANDROID_STL=c++_shared' "$GRADLE_FILE"; then
+              echo "Injecting -DANDROID_STL=c++_shared into build.gradle..."
+              sed -i '/cmake {/a\                arguments "-DANDROID_STL=c++_shared"' "$GRADLE_FILE"
+            fi
+          fi
 
       - name: Build APK with Gradle
         run: |
